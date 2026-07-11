@@ -48,7 +48,7 @@ not a library or an app you run directly. There is no build step.
 
 ## The flush proxy (`proxy/`)
 
-Optional companion. Pre-flight §11 detects it (`ANTHROPIC_BASE_URL` + `/health`),
+Optional companion. Pre-flight §2 detects it (`ANTHROPIC_BASE_URL` + `/health`),
 asks the user, and records the opt-in in `state.json.flush_proxy`. Inner 5.5
 reads that field — not the `EVERCODE_FLUSH_PROXY` env var — to emit the unique
 sentinel `<<EC_FLUSH:<timestamp>>>`; the proxy trims history at that boundary

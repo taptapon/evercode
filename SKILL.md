@@ -121,7 +121,7 @@ if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
 fi
 
 # Compare local vs upstream version (no jq required — sed parses the tiny
-# version field, so this works even before §3 installs jq).
+# version field, so this works even before §4 installs jq).
 if [ -n "$SKILL_DIR" ]; then
   LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
   LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
@@ -143,199 +143,15 @@ if [ -n "$SKILL_DIR" ]; then
 fi
 ```
 
-`SKILL_DIR` is reused below: in §9 it is written to `state.json.skill_dir`,
-and in §10 it locates `INVARIANTS.md`. If the probe failed (neither install
+`SKILL_DIR` is reused below: in §10 it is written to `state.json.skill_dir`,
+and in §11 it locates `INVARIANTS.md`. If the probe failed (neither install
 location matched), continue without auto-update — the shift can still run as
-long as `INVARIANTS.md` is reachable via the fallback in §10.
+long as `INVARIANTS.md` is reachable via the fallback in §11.
 
 Network failures, HTTP errors, and missing `claude` CLI are all swallowed
 silently. This step must never block a shift from starting.
 
-### 2. Bypass-permissions confirmation
-
-Evercode is fully autonomous — it runs many tool calls and edits without human
-input. If Claude Code is NOT launched with `--dangerously-skip-permissions`, the
-loop will stall on permission prompts while the user is away.
-
-There is **no reliable way** for the agent to introspect the current permission
-mode from inside a session. So ask the user to confirm once, as the first pre-flight
-question:
-
-```
-Before I start: is this session running in bypass-permissions mode
-(i.e., you launched Claude Code with `--dangerously-skip-permissions`)?
-
-Without it, the autonomous loop will stall on permission prompts while you're away.
-
-Reply "yes" to proceed, or "no" to abort — in which case, relaunch Claude Code
-with the flag and trigger evercode again.
-```
-
-If the user says no → abort with the above instructions. If yes → continue.
-
-### 3. `jq` dependency
-
-Every subsequent step reads/writes `state.json` with `jq`. If it is not on
-PATH, install it via the platform's package manager before proceeding:
-
-```bash
-if ! command -v jq >/dev/null 2>&1; then
-  if command -v brew >/dev/null 2>&1; then
-    brew install jq
-  elif command -v apt-get >/dev/null 2>&1; then
-    sudo apt-get update && sudo apt-get install -y jq
-  elif command -v dnf >/dev/null 2>&1; then
-    sudo dnf install -y jq
-  elif command -v yum >/dev/null 2>&1; then
-    sudo yum install -y jq
-  elif command -v pacman >/dev/null 2>&1; then
-    sudo pacman -S --noconfirm jq
-  else
-    echo "Could not auto-install jq. Please install it and retry." >&2
-    exit 1
-  fi
-fi
-```
-
-On Linux this may prompt for a sudo password. Pre-flight is interactive (the
-user is still present), so a password prompt is acceptable here — it would
-not be acceptable once the autonomous loop starts. After installing, re-check
-`command -v jq` and abort with a clear message if it still isn't available.
-
-### 4. Git repo detection
-
-Run `git rev-parse --is-inside-work-tree` to determine if the cwd is inside a
-git repo.
-
-- **Git repo → full mode.** All commit-per-goal, drift, rollback, handoff-commit
-machinery runs.
-- **No git repo → graceful-degrade mode.** See §Non-Git Degrade Mode for the
-limitations. Warn the user once and ask for confirmation before proceeding:
-  ```
-  This directory is not a git repo. Evercode will run in degrade mode:
-  no commits, no rollback, no drift protection. Failed goals may leave partial
-  changes in your working tree. Proceed?
-  ```
-  If yes → continue in degrade mode. If no → abort.
-
-### 5. Gitignore entry (git mode only)
-
-Ensure `.evercode/` is ignored. Read `.gitignore` (create if missing) and
-append `.evercode/` on its own line if not already present. This is a one-line
-diff the user will see alongside their other changes — expected and explicit.
-
-```bash
-if ! grep -qxF '.evercode/' .gitignore 2>/dev/null; then
-  printf '\n.evercode/\n' >> .gitignore
-fi
-```
-
-Do NOT use `.git/info/exclude` — we prefer the tracked `.gitignore` for
-collaborator consistency and clarity.
-
-### 6. Branch check (git mode only)
-
-Run `git branch --show-current`. Must not be `main` or `master`.
-
-- If on `main` or `master`: **propose creating a new branch** rather than
-waiting for the user. Suggest a descriptive name based on session context
-(e.g., `evercode/YYYY-MM-DD` or `feat/<topic>` inferred from the
-conversation). Ask for confirmation or a different name. On confirmation,
-run `git checkout -b <name>` and proceed.
-- On any other branch: proceed on it.
-
-Record the branch as `BRANCH` and the current commit as `BASE_COMMIT`.
-
-### 7. Clean working tree (git mode only)
-
-Run `git status --short`. If there are uncommitted changes (other than the
-`.gitignore` line we just added), ask the user to commit or stash them. This is
-the only other permitted question besides goal confirmation.
-
-If the `.gitignore` change is the only dirty file, commit it automatically
-with message `chore: ignore .evercode/` before proceeding.
-
-### 8. Active-shift guard
-
-This should have been handled in §Routing, but guard against races: re-scan
-`.evercode/runs/*/state.json` and verify no `status: "running"` entry exists.
-If one appeared between routing and here, loop back to §Stop-Resume-Abandon.
-
-### 9. Initialize this run
-
-**All timestamps in this skill are LOCAL time, not UTC.** Run folders and
-handoffs are read by the human on their wall clock; UTC makes "when did this
-run start" mental math harder. Use `date` (no `-u`) everywhere. For
-machine-readable timestamps in state.json, include the local offset — never
-append `Z`.
-
-```bash
-RUN_ID=$(date +%Y-%m-%d-%H%M)                              # local time
-RUN_DIR=".evercode/runs/${RUN_ID}"
-mkdir -p "$RUN_DIR/key results"
-```
-
-Write initial state to `$RUN_DIR/state.json`. Note `started_at` is **null** at
-this point — pre-flight (bypass-permissions Q, branch Q, objective Q, etc.)
-is interactive, not autonomous work. The shift clock starts at the handoff
-banner (see §Objective Confirmation), so elapsed-time and the 8h hard cap
-measure only the autonomous portion.
-
-The `skill_dir` field below holds the `$SKILL_DIR` resolved in §1; substitute
-the real path when writing the file. See §10 for the fallback if §1's probe
-failed.
-
-```json
-{
-  "run_id": "2026-04-19-0847",
-  "status": "running",
-  "started_at": null,
-  "mode": "git",
-  "cwd": "/abs/path/to/project",
-  "skill_dir": "<$SKILL_DIR resolved in §1>",
-  "branch": "feat/xyz",
-  "base_commit": "abc1234",
-  "expected_head": "abc1234",
-  "objective": null,
-  "hard_cap_hours": 8,
-  "average_task_duration_minutes": null,
-  "end_consensus_file": null,
-  "key_results": [],
-  "test_results": null,
-  "flush_proxy": false
-}
-```
-
-(In degrade mode: `"mode": "no-git"`, omit `branch`, `base_commit`, `expected_head`.)
-
-### 10. Verify INVARIANTS.md is reachable
-
-The non-negotiable rules live in `INVARIANTS.md`, a sibling of this SKILL.md
-in the skill's install directory. The agent does NOT copy it into the run
-folder — it reads directly from the skill dir every time it needs a refresh.
-
-`SKILL_DIR` (resolved in §1, recorded as `state.json.skill_dir` in §9) is what
-later tasks read after context compaction. Sanity-check that the file is
-reachable before proceeding:
-
-```bash
-test -f "$SKILL_DIR/INVARIANTS.md" || {
-  # Last-ditch fallback: §1's probe failed AND state.json's skill_dir is bogus.
-  if [ -f "$HOME/.claude/skills/evercode/INVARIANTS.md" ]; then
-    SKILL_DIR="$HOME/.claude/skills/evercode"
-    jq --arg sd "$SKILL_DIR" '.skill_dir = $sd' "$RUN_DIR/state.json" \
-      > "$RUN_DIR/state.json.tmp" && mv "$RUN_DIR/state.json.tmp" "$RUN_DIR/state.json"
-  else
-    echo "FATAL: cannot locate INVARIANTS.md — aborting shift." >&2
-    exit 1
-  fi
-}
-```
-
-Aborting here is correct: every per-task refresh in §Inner 0 reads
-`$SKILL_DIR/INVARIANTS.md`, so the run cannot proceed without it.
-
-### 11. Flush proxy (optional)
+### 2. Flush proxy (optional)
 
 The flush proxy trims conversation history at task boundaries so a long run
 doesn't accumulate an unbounded transcript. It is **optional** and must sit on
@@ -392,6 +208,190 @@ Then branch — **ask at most one question**, per the one-at-a-time pre-flight r
 Write the decision to `state.json.flush_proxy` (boolean). This field — not the
 env var — is what Inner 5.5 reads to decide whether to emit sentinels, so the
 opt-in survives compaction and works regardless of Bash-env propagation.
+
+### 3. Bypass-permissions confirmation
+
+Evercode is fully autonomous — it runs many tool calls and edits without human
+input. If Claude Code is NOT launched with `--dangerously-skip-permissions`, the
+loop will stall on permission prompts while the user is away.
+
+There is **no reliable way** for the agent to introspect the current permission
+mode from inside a session. So ask the user to confirm once, as the first pre-flight
+question:
+
+```
+Before I start: is this session running in bypass-permissions mode
+(i.e., you launched Claude Code with `--dangerously-skip-permissions`)?
+
+Without it, the autonomous loop will stall on permission prompts while you're away.
+
+Reply "yes" to proceed, or "no" to abort — in which case, relaunch Claude Code
+with the flag and trigger evercode again.
+```
+
+If the user says no → abort with the above instructions. If yes → continue.
+
+### 4. `jq` dependency
+
+Every subsequent step reads/writes `state.json` with `jq`. If it is not on
+PATH, install it via the platform's package manager before proceeding:
+
+```bash
+if ! command -v jq >/dev/null 2>&1; then
+  if command -v brew >/dev/null 2>&1; then
+    brew install jq
+  elif command -v apt-get >/dev/null 2>&1; then
+    sudo apt-get update && sudo apt-get install -y jq
+  elif command -v dnf >/dev/null 2>&1; then
+    sudo dnf install -y jq
+  elif command -v yum >/dev/null 2>&1; then
+    sudo yum install -y jq
+  elif command -v pacman >/dev/null 2>&1; then
+    sudo pacman -S --noconfirm jq
+  else
+    echo "Could not auto-install jq. Please install it and retry." >&2
+    exit 1
+  fi
+fi
+```
+
+On Linux this may prompt for a sudo password. Pre-flight is interactive (the
+user is still present), so a password prompt is acceptable here — it would
+not be acceptable once the autonomous loop starts. After installing, re-check
+`command -v jq` and abort with a clear message if it still isn't available.
+
+### 5. Git repo detection
+
+Run `git rev-parse --is-inside-work-tree` to determine if the cwd is inside a
+git repo.
+
+- **Git repo → full mode.** All commit-per-goal, drift, rollback, handoff-commit
+machinery runs.
+- **No git repo → graceful-degrade mode.** See §Non-Git Degrade Mode for the
+limitations. Warn the user once and ask for confirmation before proceeding:
+  ```
+  This directory is not a git repo. Evercode will run in degrade mode:
+  no commits, no rollback, no drift protection. Failed goals may leave partial
+  changes in your working tree. Proceed?
+  ```
+  If yes → continue in degrade mode. If no → abort.
+
+### 6. Gitignore entry (git mode only)
+
+Ensure `.evercode/` is ignored. Read `.gitignore` (create if missing) and
+append `.evercode/` on its own line if not already present. This is a one-line
+diff the user will see alongside their other changes — expected and explicit.
+
+```bash
+if ! grep -qxF '.evercode/' .gitignore 2>/dev/null; then
+  printf '\n.evercode/\n' >> .gitignore
+fi
+```
+
+Do NOT use `.git/info/exclude` — we prefer the tracked `.gitignore` for
+collaborator consistency and clarity.
+
+### 7. Branch check (git mode only)
+
+Run `git branch --show-current`. Must not be `main` or `master`.
+
+- If on `main` or `master`: **propose creating a new branch** rather than
+waiting for the user. Suggest a descriptive name based on session context
+(e.g., `evercode/YYYY-MM-DD` or `feat/<topic>` inferred from the
+conversation). Ask for confirmation or a different name. On confirmation,
+run `git checkout -b <name>` and proceed.
+- On any other branch: proceed on it.
+
+Record the branch as `BRANCH` and the current commit as `BASE_COMMIT`.
+
+### 8. Clean working tree (git mode only)
+
+Run `git status --short`. If there are uncommitted changes (other than the
+`.gitignore` line we just added), ask the user to commit or stash them. This is
+the only other permitted question besides goal confirmation.
+
+If the `.gitignore` change is the only dirty file, commit it automatically
+with message `chore: ignore .evercode/` before proceeding.
+
+### 9. Active-shift guard
+
+This should have been handled in §Routing, but guard against races: re-scan
+`.evercode/runs/*/state.json` and verify no `status: "running"` entry exists.
+If one appeared between routing and here, loop back to §Stop-Resume-Abandon.
+
+### 10. Initialize this run
+
+**All timestamps in this skill are LOCAL time, not UTC.** Run folders and
+handoffs are read by the human on their wall clock; UTC makes "when did this
+run start" mental math harder. Use `date` (no `-u`) everywhere. For
+machine-readable timestamps in state.json, include the local offset — never
+append `Z`.
+
+```bash
+RUN_ID=$(date +%Y-%m-%d-%H%M)                              # local time
+RUN_DIR=".evercode/runs/${RUN_ID}"
+mkdir -p "$RUN_DIR/key results"
+```
+
+Write initial state to `$RUN_DIR/state.json`. Note `started_at` is **null** at
+this point — pre-flight (bypass-permissions Q, branch Q, objective Q, etc.)
+is interactive, not autonomous work. The shift clock starts at the handoff
+banner (see §Objective Confirmation), so elapsed-time and the 8h hard cap
+measure only the autonomous portion.
+
+The `skill_dir` field below holds the `$SKILL_DIR` resolved in §1; substitute
+the real path when writing the file. See §11 for the fallback if §1's probe
+failed.
+
+```json
+{
+  "run_id": "2026-04-19-0847",
+  "status": "running",
+  "started_at": null,
+  "mode": "git",
+  "cwd": "/abs/path/to/project",
+  "skill_dir": "<$SKILL_DIR resolved in §1>",
+  "branch": "feat/xyz",
+  "base_commit": "abc1234",
+  "expected_head": "abc1234",
+  "objective": null,
+  "hard_cap_hours": 8,
+  "average_task_duration_minutes": null,
+  "end_consensus_file": null,
+  "key_results": [],
+  "test_results": null,
+  "flush_proxy": false
+}
+```
+
+(In degrade mode: `"mode": "no-git"`, omit `branch`, `base_commit`, `expected_head`.)
+
+### 11. Verify INVARIANTS.md is reachable
+
+The non-negotiable rules live in `INVARIANTS.md`, a sibling of this SKILL.md
+in the skill's install directory. The agent does NOT copy it into the run
+folder — it reads directly from the skill dir every time it needs a refresh.
+
+`SKILL_DIR` (resolved in §1, recorded as `state.json.skill_dir` in §10) is what
+later tasks read after context compaction. Sanity-check that the file is
+reachable before proceeding:
+
+```bash
+test -f "$SKILL_DIR/INVARIANTS.md" || {
+  # Last-ditch fallback: §1's probe failed AND state.json's skill_dir is bogus.
+  if [ -f "$HOME/.claude/skills/evercode/INVARIANTS.md" ]; then
+    SKILL_DIR="$HOME/.claude/skills/evercode"
+    jq --arg sd "$SKILL_DIR" '.skill_dir = $sd' "$RUN_DIR/state.json" \
+      > "$RUN_DIR/state.json.tmp" && mv "$RUN_DIR/state.json.tmp" "$RUN_DIR/state.json"
+  else
+    echo "FATAL: cannot locate INVARIANTS.md — aborting shift." >&2
+    exit 1
+  fi
+}
+```
+
+Aborting here is correct: every per-task refresh in §Inner 0 reads
+`$SKILL_DIR/INVARIANTS.md`, so the run cannot proceed without it.
 
 ## Objective Question
 
@@ -1058,7 +1058,7 @@ Update state.json:
 ### Inner 5.5: Flush-proxy sentinel (optional)
 
 If this run opted into flushing (`state.json.flush_proxy == true`, set during
-pre-flight §11), emit a **unique** sentinel now so the proxy trims conversation
+pre-flight §2), emit a **unique** sentinel now so the proxy trims conversation
 history at this task boundary:
 
 ```bash
@@ -1070,7 +1070,7 @@ Why the gate is on disk, not env: the opt-in must survive compaction and not
 depend on `EVERCODE_FLUSH_PROXY` propagating across separate Bash tool calls
 (it doesn't — each call is a fresh subprocess of Claude Code). `state.json` is
 the source of truth. `EVERCODE_FLUSH_PROXY=1` remains useful only as a
-pre-flight hint (§11 reads it to skip the question) and as the classic
+pre-flight hint (§2 reads it to skip the question) and as the classic
 launch-time opt-in.
 
 Why this is safe: evercode recovers full state from disk via **Inner 0** every
