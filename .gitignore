@@ -1,5 +1,6 @@
 # Evercode Flush Proxy — runtime artifacts
 proxy/proxy.log
+proxy/proxy.pid
 proxy/__pycache__/
 __pycache__/
 *.pyc

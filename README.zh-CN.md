@@ -77,6 +77,13 @@ Evercode 做了三个结构性押注：
 git clone https://github.com/taptapon/evercode.git ~/.claude/skills/evercode
 ```
 
+或：如果你已在本地有仓库，直接复制进去（会解开 symlink、排除开发期垃圾）——适合无需联网、本地迭代：
+
+```bash
+./install-local.sh                       # → ~/.claude/skills/evercode
+./install-local.sh ~/proj/.claude/skills # → 某个项目的技能目录
+```
+
 重启 Claude Code（或开启新会话）。技能会自动注册。
 
 ## 快速开始
@@ -164,9 +171,17 @@ proxy/   # flush proxy：在每个任务边界裁剪对话，不含 summarizer
 它位于 Claude Code 的 API 路径上。每次任务提交后，技能会发出一个唯一的哨兵标记；代理丢弃较早的对话轮次，并留下一个指针，告诉代理去重读磁盘（这一点它本来也会做）。循环里没有第二个 LLM，没有后台线程，纯标准库实现。
 
 ```bash
+./evercode --dangerously-skip-permissions          # 一条命令：启动 proxy + Claude Code
+```
+
+启动器会启动 flush proxy（若已在运行则复用），把 Claude Code 指向它，并替你设好 `EVERCODE_FLUSH_PROXY=1`——这样你还顺带跳过了班次前的确认提问。请在你的**项目**目录里运行它；proxy 通过脚本自身位置定位。如果 proxy 起不来，启动器会退化为不带 proxy 启动 Claude Code（绝不指向死端口）。加 `--no-proxy` 可显式跳过。
+
+或者手动分步：
+
+```bash
 ./proxy/run.sh                                      # 监听 :5589
 export ANTHROPIC_BASE_URL=http://127.0.0.1:5589     # 把 Claude Code 指向这里
-export EVERCODE_FLUSH_PROXY=1                      # 技能发出哨兵标记
+export EVERCODE_FLUSH_PROXY=1                       # 技能发出哨兵标记
 ```
 
 `EVERCODE_FLUSH_PROXY` 控制哨兵的发射，所以不运行该代理的用户不会付出任何代价。完整细节、调参与单次哨兵设计见 [`proxy/README.md`](proxy/README.md)。

@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# evercode launcher — start the flush proxy (if not already up) and launch
+# Claude Code pointed at it, in one command.
+#
+#   ./evercode --dangerously-skip-permissions      # with flush proxy (default)
+#   ./evercode --no-proxy ...                       # skip the proxy entirely
+#   claude ...                                      # without proxy, as before
+#
+# Run from your PROJECT directory (the thing you want worked on); the launcher
+# finds the proxy via this script's own location:
+#   cd ~/my-project && ~/github/evercode/evercode --dangerously-skip-permissions
+#
+# The proxy is a shared service: this launcher reuses one already running on
+# :5589, and leaves it running after Claude Code exits (stop with ./proxy/stop.sh).
+# If the proxy can't become healthy, we fall back to launching Claude Code WITHOUT
+# rewriting ANTHROPIC_BASE_URL — never pointing it at a dead port.
+#
+# Env vars (optional, forwarded to proxy/run.sh):
+#   EVERCODE_PROXY_PORT   default 5589
+#   EVERCODE_UPSTREAM     e.g. http://127.0.0.1:15721 (cc-switch) — set when chaining
+set -euo pipefail
+
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PORT="${EVERCODE_PROXY_PORT:-5589}"
+PROXY_URL="http://127.0.0.1:${PORT}"
+
+# Strip our own flag; pass everything else through to Claude Code.
+USE_PROXY=1
+ARGS=()
+for a in "$@"; do
+  if [ "$a" = "--no-proxy" ]; then
+    USE_PROXY=0
+  else
+    ARGS+=("$a")
+  fi
+done
+
+if ! command -v claude >/dev/null 2>&1; then
+  echo "evercode: 'claude' not found on PATH. Install Claude Code first." >&2
+  exit 127
+fi
+
+health_ok() {
+  curl -fsS --max-time 1 "${PROXY_URL}/health" >/dev/null 2>&1
+}
+
+if [ "$USE_PROXY" = "1" ]; then
+  if health_ok; then
+    echo "evercode: flush proxy already running on :${PORT}, reusing."
+  else
+    echo "evercode: starting flush proxy on :${PORT} ..."
+    # run.sh reads EVERCODE_UPSTREAM / EVERCODE_PROXY_PORT from the env, and
+    # backgrounds server.py when EVERCODE_PROXY_DAEMON=1.
+    EVERCODE_PROXY_PORT="$PORT" EVERCODE_PROXY_DAEMON=1 "${DIR}/proxy/run.sh" >/dev/null || true
+    # Poll /health for the server to bind. Bail early if the process died (e.g.
+    # port already in use) so a port conflict fails fast instead of waiting the
+    # full budget. Each curl is capped at 1s so a non-HTTP listener on the port
+    # can't stall us.
+    PID_FILE="${DIR}/proxy/proxy.pid"
+    ready=0
+    for _ in $(seq 1 25); do
+      if health_ok; then ready=1; break; fi
+      pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+      if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
+        echo "evercode: proxy process exited (port conflict?). See ${DIR}/proxy/proxy.log." >&2
+        break
+      fi
+      sleep 0.2
+    done
+    if [ "$ready" != "1" ]; then
+      echo "evercode: WARNING — flush proxy did not become healthy on :${PORT}." >&2
+      echo "           See ${DIR}/proxy/proxy.log. Launching Claude Code WITHOUT the proxy." >&2
+      USE_PROXY=0
+    fi
+  fi
+fi
+
+if [ "$USE_PROXY" = "1" ]; then
+  export ANTHROPIC_BASE_URL="$PROXY_URL"
+  export EVERCODE_FLUSH_PROXY=1
+  echo "evercode: ANTHROPIC_BASE_URL=${PROXY_URL}  (flush proxy on)"
+else
+  echo "evercode: launching Claude Code without flush proxy."
+fi
+
+# Hand off to Claude Code, passing through all flags (minus --no-proxy).
+# Guard the empty-array expansion for bash 3.2 (macOS) under set -u.
+if [ "${#ARGS[@]}" -gt 0 ]; then
+  exec claude "${ARGS[@]}"
+else
+  exec claude
+fi

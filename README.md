@@ -77,6 +77,14 @@ Or clone directly into your skills directory:
 git clone https://github.com/taptapon/evercode.git ~/.claude/skills/evercode
 ```
 
+Or, if you already have the repo locally, copy it in (dereferences symlinks,
+excludes dev junk) — handy for iterating without a network round-trip:
+
+```bash
+./install-local.sh                       # → ~/.claude/skills/evercode
+./install-local.sh ~/proj/.claude/skills # → per-project skills dir
+```
+
 Restart Claude Code (or start a new session). The skill auto-registers.
 
 ## Quickstart
@@ -170,9 +178,22 @@ agent to re-read disk (which it does anyway). No second LLM in the loop, no
 background threads, pure stdlib.
 
 ```bash
+./evercode --dangerously-skip-permissions          # one command: starts proxy + Claude Code
+```
+
+The launcher starts the flush proxy (reusing one already running), points Claude
+Code at it, and sets `EVERCODE_FLUSH_PROXY=1` for you — so you skip the pre-flight
+question too. Run it from your **project** directory; the proxy is found via the
+script's location. If the proxy can't start, it falls back to launching Claude
+Code without it (never pointing at a dead port). Pass `--no-proxy` to skip it
+explicitly.
+
+Or, manually:
+
+```bash
 ./proxy/run.sh                                      # listens on :5589
 export ANTHROPIC_BASE_URL=http://127.0.0.1:5589     # point Claude Code here
-export EVERCODE_FLUSH_PROXY=1                      # skill emits sentinels
+export EVERCODE_FLUSH_PROXY=1                       # skill emits sentinels
 ```
 
 `EVERCODE_FLUSH_PROXY` gates emission, so users who don't run the proxy pay no

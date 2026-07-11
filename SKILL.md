@@ -366,14 +366,17 @@ Then branch — **ask at most one question**, per the one-at-a-time pre-flight r
   ```
   Enable the flush proxy? It trims conversation history at task boundaries.
   NOTE: the proxy must be on your API path, which is fixed at Claude Code launch
-  — it is NOT currently detected. To use it:
+  — it is NOT currently detected. To use it, easiest is the one-command launcher:
+    ./evercode --dangerously-skip-permissions
+  which starts the proxy, sets ANTHROPIC_BASE_URL + EVERCODE_FLUSH_PROXY=1, and
+  launches Claude Code for you. Or manually:
     1. ./proxy/run.sh                         (separate shell)
     2. relaunch Claude Code with ANTHROPIC_BASE_URL=http://127.0.0.1:5589
        and EVERCODE_FLUSH_PROXY=1
     3. re-trigger evercode
   Enable now? (yes / no)
   ```
-  yes → print the three steps above and **abort this shift** (do not silently
+  yes → print the steps above and **abort this shift** (do not silently
   proceed without flushing). no → `flush_proxy: false`, continue.
 
 Write the decision to `state.json.flush_proxy` (boolean). This field — not the

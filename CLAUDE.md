@@ -55,14 +55,19 @@ sentinel `<<EC_FLUSH:<timestamp>>>`; the proxy trims history at that boundary
 and prepends a pointer to re-read disk (no LLM summarizer — it leans on Inner 0).
 The proxy must be on the API path *before* Claude Code launches (`ANTHROPIC_BASE_URL`
 is fixed at launch); the skill detects+records but cannot hot-plug it mid-session.
+The repo-root `./evercode` launcher handles the ordering for users: it starts the
+proxy daemonized (reusing one already up), sets the env, and `exec claude`. For
+contributor/debug use, `run.sh` also runs foreground by default and daemonized
+under `EVERCODE_PROXY_DAEMON=1`.
 
 ```bash
 # quick smoke check the module loads + core logic is intact
 python3 -c "import importlib.util as u; s=u.spec_from_file_location('n','proxy/server.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print('loaded; KEEP_RECENT=',m.KEEP_RECENT)"
 
-# run it  (before launching Claude Code)
-./proxy/run.sh
-export ANTHROPIC_BASE_URL=http://127.0.0.1:5589 EVERCODE_FLUSH_PROXY=1
+# one-command launch (starts proxy + Claude Code):  ./evercode
+# run the proxy alone — foreground:    ./proxy/run.sh
+#                        daemon:        EVERCODE_PROXY_DAEMON=1 ./proxy/run.sh
+# both then need:  export ANTHROPIC_BASE_URL=http://127.0.0.1:5589 EVERCODE_FLUSH_PROXY=1
 curl http://127.0.0.1:5589/health
 
 # stop it (shared service — NOT auto-stopped at shift end)

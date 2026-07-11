@@ -32,14 +32,29 @@ re-trim on every subsequent request, capping the agent's working context at
 
 ## Run it
 
-**Launch order matters.** The proxy must be on the API path *before* Claude
-Code starts — `ANTHROPIC_BASE_URL` is read at process launch and cannot be
-changed for a running session. Starting the proxy after launch (or `export`-ing
-`ANTHROPIC_BASE_URL` from inside the session) does nothing. So: start the
-proxy, *then* launch Claude Code.
+**Easiest — one command** (run from the project you want worked on):
+
+```bash
+~/path/to/evercode/evercode --dangerously-skip-permissions
+```
+
+The `evercode` launcher handles launch order for you: it starts the proxy
+(daemonized, reusing one already running on `:5589`), points Claude Code at it,
+and sets `EVERCODE_FLUSH_PROXY=1` — which also makes evercode's pre-flight skip
+its yes/no question. Pass `--no-proxy` to skip the proxy explicitly. If the
+proxy can't become healthy, the launcher falls back to launching Claude Code
+without it (never pointing at a dead port). The proxy is left running after
+Claude Code exits; stop it with `./proxy/stop.sh`.
+
+**Why launch order matters (and the manual alternative).** The proxy must be on
+the API path *before* Claude Code starts — `ANTHROPIC_BASE_URL` is read at
+process launch and cannot be changed for a running session. Starting the proxy
+after launch (or `export`-ing `ANTHROPIC_BASE_URL` from inside the session)
+does nothing. The launcher gets the order right; if you start things by hand:
 
 ```bash
 # 1. Start the proxy (defaults to :5589, forwards to your current ANTHROPIC_BASE_URL).
+#    Foreground (blocks the terminal) — or daemonize:  EVERCODE_PROXY_DAEMON=1 ./proxy/run.sh
 ./proxy/run.sh
 
 # 2. In the shell you'll launch Claude Code from, point it at the proxy and
