@@ -103,8 +103,12 @@ if [ -f "$INSTALLED_JSON" ] && command -v jq >/dev/null 2>&1; then
   ' "$INSTALLED_JSON" 2>/dev/null | head -1)
   if [ -n "$PLUGIN_KEY" ]; then
     SKILL_DIR=$(jq -r --arg k "$PLUGIN_KEY" '
-      .plugins[$k][0].installPath // empty
-    ' "$INSTALLED_JSON" 2>/dev/null)
+      .plugins[$k][].installPath // empty
+    ' "$INSTALLED_JSON" 2>/dev/null | sort -V | tail -1)
+    # NOTE: CC's /plugin update appends new versions to this array without
+    # removing old ones, so [0] can be stale (e.g. 1.1.0 at [0], 1.1.1 after).
+    # Each installPath ends in its version dir (.../evercode/<version>), so
+    # sorting all entries and taking the last picks the highest version.
   fi
 fi
 if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
