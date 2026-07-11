@@ -62,20 +62,21 @@ The agent ends the shift only when it explicitly proposes "we're done" and Codex
 
 ## Install
 
-From inside Claude Code:
-
-```
-/plugin marketplace add https://gitee.com/fadgabadfaf/evercode
-/plugin install evercode@evercode
-```
-
-If `/plugin marketplace add` rejects the Gitee URL, use the clone method below — it is the most reliable on Gitee.
-
-Or clone directly into your skills directory:
+Clone into your skills directory (recommended — works on Gitee):
 
 ```bash
 git clone https://gitee.com/fadgabadfaf/evercode.git ~/.claude/skills/evercode
 ```
+
+Restart Claude Code (or start a new session). The skill auto-registers as `evercode`.
+
+> **`/plugin marketplace add` does not work on Gitee.** Claude Code mishandles
+> non-GitHub marketplace URLs — it rewrites the git URL to a `github.com` host
+> and HTTP-fetches it, returning a 404 / "expected object, received string"
+> error ([anthropics/claude-code#10403](https://github.com/anthropics/claude-code/issues/10403),
+> [#9756](https://github.com/anthropics/claude-code/issues/9756)). There is no
+> fix the repo can make; use the `git clone` above. If you publish a GitHub
+> mirror later, `/plugin marketplace add <gh-owner>/evercode` works there.
 
 Restart Claude Code (or start a new session). The skill auto-registers.
 
