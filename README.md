@@ -65,14 +65,16 @@ The agent ends the shift only when it explicitly proposes "we're done" and Codex
 From inside Claude Code:
 
 ```
-/plugin marketplace add ppuliu/evercode
+/plugin marketplace add https://gitee.com/fadgabadfaf/evercode
 /plugin install evercode@evercode
 ```
+
+If `/plugin marketplace add` rejects the Gitee URL, use the clone method below — it is the most reliable on Gitee.
 
 Or clone directly into your skills directory:
 
 ```bash
-git clone https://github.com/ppuliu/evercode.git ~/.claude/skills/evercode
+git clone https://gitee.com/fadgabadfaf/evercode.git ~/.claude/skills/evercode
 ```
 
 Restart Claude Code (or start a new session). The skill auto-registers.

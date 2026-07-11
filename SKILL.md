@@ -82,8 +82,9 @@ decisions.
 Run this **first**, before any user prompt. It resolves the skill's install
 directory (used throughout pre-flight and by every later context refresh)
 and checks whether a newer version of the skill exists upstream. If so, it
-pulls it in. The check is fast (one `curl` to a GitHub raw URL) so it runs
-on every shift — no throttling.
+pulls it in. The check compares the local HEAD against upstream via
+`git ls-remote` (host-agnostic — works on Gitee, where raw-URL fetches are
+blocked) so it runs on every shift — no throttling.
 
 Updates apply to the **next** `/evercode` invocation — Claude has already
 loaded the current SKILL.md into context, so hot-swapping the running shift
@@ -116,25 +117,23 @@ if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
   fi
 fi
 
-# Compare local vs upstream version (no jq required — sed parses the tiny
-# version field, so this works even before §3 installs jq).
+# Compare local HEAD vs upstream HEAD (host-agnostic: works on Gitee, where
+# raw-URL fetches 403 — git ls-remote does not). jq not required here.
 if [ -n "$SKILL_DIR" ]; then
-  LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
-  LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
-  REMOTE_VER=$(curl -fsS --max-time 5 \
-    "https://raw.githubusercontent.com/ppuliu/evercode/main/.claude-plugin/plugin.json" \
-    2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-
-  if [ -n "$LOCAL_VER" ] && [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" != "$REMOTE_VER" ] \
-     && [ "$(printf '%s\n%s\n' "$LOCAL_VER" "$REMOTE_VER" | sort -V | tail -1)" = "$REMOTE_VER" ]; then
-    if git -C "$SKILL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  REMOTE_URL="https://gitee.com/fadgabadfaf/evercode.git"
+  REMOTE_HEAD=$(git ls-remote "$REMOTE_URL" refs/heads/main refs/heads/master 2>/dev/null | awk 'NR==1{print $1}')
+  if git -C "$SKILL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    # clone install: pull if upstream moved
+    LOCAL_HEAD=$(git -C "$SKILL_DIR" rev-parse HEAD 2>/dev/null)
+    if [ -n "$LOCAL_HEAD" ] && [ -n "$REMOTE_HEAD" ] && [ "$LOCAL_HEAD" != "$REMOTE_HEAD" ]; then
       git -C "$SKILL_DIR" pull --ff-only --quiet 2>/dev/null \
-        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (git clone). Active on next /evercode run."
-    else
-      TARGET="${PLUGIN_KEY:-evercode}"
-      claude plugin update "$TARGET" >/dev/null 2>&1 \
-        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (plugin). Active on next /evercode run."
+        && echo "evercode: updated ${LOCAL_HEAD:0:7} → ${REMOTE_HEAD:0:7} (git pull). Active on next /evercode run."
     fi
+  elif [ -n "$REMOTE_HEAD" ]; then
+    # marketplace/plugin install (not a git repo): best-effort update
+    TARGET="${PLUGIN_KEY:-evercode}"
+    claude plugin update "$TARGET" >/dev/null 2>&1 \
+      && echo "evercode: checked for updates via plugin marketplace. Active on next /evercode run."
   fi
 fi
 ```
