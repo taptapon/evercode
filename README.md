@@ -1,5 +1,7 @@
 # Evercode
 
+**English** | [简体中文](README.zh-CN.md)
+
 > Step away.
 >
 > Claude Code keeps coding.
