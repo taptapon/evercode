@@ -22,19 +22,19 @@ not a library or an app you run directly. There is no build step.
 
 ## Mental model (read before touching SKILL.md)
 
-- **Disk is the source of truth, never memory.** Every verdict — Codex review,
+- **Disk is the source of truth, never memory.** Every verdict — code review (Codex or self),
   decomposition approval, run state — is a file under
   `.evercode/runs/<RUN_ID>/`. After hours of work and multiple compactions
   the agent's memory is wrong; the files are right.
 - **The skill is built to *survive* compaction.** Inner 0 re-reads
   `INVARIANTS.md` + `state.json` + `current-decomp.md` before each task. Any new
   state MUST be persisted to `state.json`, not held in the conversation.
-- **Inner loop:** `0 refresh → 1 plan → 2 execute → 3 Codex review (file-gated)
+- **Inner loop:** `0 refresh → 1 plan → 2 execute → 3 code review, file-gated (Codex when `EVERCODE_CODEX=1`, else self)`
   → 4 validate → 5 commit → 5.5 flush sentinel (optional) → 6 next task`.
 - **Gates exist because a compacted, forgetful agent will try to skip them.**
   The Inner 5 pre-commit file gate (verifies `code-review.txt` exists, is
   non-empty, and matches the verdict in state) is the load-bearing defense
-  against skipping Codex. Don't weaken it.
+  against skipping the review (Codex or self). Don't weaken it.
 
 ## Editing SKILL.md / INVARIANTS.md
 

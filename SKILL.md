@@ -23,15 +23,7 @@ codebase without asking any questions after the initial goal confirmation.
 This skill has a **single unified entrypoint**. On invocation, route based on
 (a) whether an evercode run is active and (b) the user's phrasing.
 
-**A note on OKR vocabulary.** This skill borrows three terms from the OKR
-framework — **objective** (aspirational direction the user sets), **key
-result** (a concrete shippable step that advances the objective, gated by
-Codex), and **task** (an independently committable unit under a key result).
-We borrow the vocabulary and hierarchy only; we do not adopt the rest of
-corporate OKR ritual (scoring, quarterly cycles, stretch targets, etc.).
-Key results here are typically deliverable-shaped ("migrate /users endpoints
-to ApiError") rather than metric-shaped; Codex's gate is "does this advance
-the objective?" not "is this measurable?".
+**Vocabulary:** **objective** (direction the user sets), **key result** (a concrete shippable step advancing it, gated by Codex), **task** (an independently committable unit under a KR). KRs are deliverable-shaped, not metric-shaped.
 
 ## Routing
 
@@ -105,10 +97,7 @@ if [ -f "$INSTALLED_JSON" ] && command -v jq >/dev/null 2>&1; then
     SKILL_DIR=$(jq -r --arg k "$PLUGIN_KEY" '
       .plugins[$k][].installPath // empty
     ' "$INSTALLED_JSON" 2>/dev/null | sort -V | tail -1)
-    # NOTE: CC's /plugin update appends new versions to this array without
-    # removing old ones, so [0] can be stale (e.g. 1.1.0 at [0], 1.1.1 after).
-    # Each installPath ends in its version dir (.../evercode/<version>), so
-    # sorting all entries and taking the last picks the highest version.
+    # /plugin update appends new versions without pruning; installPath ends in its version dir, so sort -V | tail -1 picks the highest.
   fi
 fi
 if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
@@ -120,8 +109,7 @@ if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
   fi
 fi
 
-# Compare local vs upstream version (no jq required — sed parses the tiny
-# version field, so this works even before §4 installs jq).
+# Compare local vs upstream (sed parses version; works before §4 installs jq).
 if [ -n "$SKILL_DIR" ]; then
   LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
   LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
@@ -151,6 +139,13 @@ long as `INVARIANTS.md` is reachable via the fallback in §11.
 Network failures, HTTP errors, and missing `claude` CLI are all swallowed
 silently. This step must never block a shift from starting.
 
+**Codex dual-review is opt-in** (default: Claude self-reviews). Resolve the flag once here; §10 writes it to `state.json.codex_on`, and every Codex gate keys off it:
+
+```bash
+CODEX_ON=$([ "${EVERCODE_CODEX:-0}" = "1" ] && echo true || echo false)
+[ "$CODEX_ON" = "true" ] && echo "evercode: Codex dual-review ENABLED (EVERCODE_CODEX=1)."
+```
+
 ### 2. Flush proxy (optional)
 
 The flush proxy trims conversation history at task boundaries so a long run
@@ -169,10 +164,7 @@ HEALTH_OK=0
 [ "$PROXY_ON_PATH" = "1" ] && \
   curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && HEALTH_OK=1
 
-# Build an absolute, copy-pasteable relaunch command for the Not-detected prompt.
-# The user is inside a CC session whose cwd IS their project dir; ./evercode and
-# ./proxy/run.sh do NOT exist there — the launcher must be invoked by ABSOLUTE
-# path ($SKILL_DIR, resolved in §1), and CC must be relaunched in that same dir.
+# Absolute-path relaunch cmd — cwd is the user's project dir, so ./evercode won't resolve; use $SKILL_DIR (§1).
 LAUNCHER="$SKILL_DIR/evercode"
 if [ -x "$LAUNCHER" ]; then
   RELAUNCH_CMD="cd \"$PWD\" && \"$LAUNCHER\" --dangerously-skip-permissions"
@@ -360,7 +352,8 @@ failed.
   "end_consensus_file": null,
   "key_results": [],
   "test_results": null,
-  "flush_proxy": false
+  "flush_proxy": false,
+  "codex_on": "<$CODEX_ON from §1>"
 }
 ```
 
@@ -420,20 +413,11 @@ larger direction in mind.
 Scan these sources in priority order. Conversation history is the most
 important signal — it tells you what the user actually cares about right now.
 
-1. **Chat/session history (PRIMARY)** — Read the full conversation carefully.
-
-  What has the user been working on? What did they ask for that isn't done
-   yet? What problems did they mention? Extract concrete unfinished tasks,
-   stated intentions, and open threads. If an objective was given, focus on
-   conversation threads related to it.
-2. **Unfinished changes** — Git state: recent commits, uncommitted work.
-
-  Cross-reference with session history. (Skip in degrade mode.)
-3. **Unimplemented specs and designs** — Check `docs/` for specs discussed
-
-  in the session but lacking implementation.
-4. **Codebase TODOs** — `grep -r "TODO\|FIXME\|HACK\|XXX"` across the project.
-5. **CLAUDE.md / project docs** — Conventions and architecture.
+1. **Chat/session history (PRIMARY)** — read the full conversation; extract unfinished tasks, stated intentions, open threads (scoped to the objective if given).
+2. **Unfinished changes** — git state: recent commits, uncommitted work (skip in degrade mode).
+3. **Unimplemented specs** — `docs/` specs discussed but not implemented.
+4. **Codebase TODOs** — `grep -r "TODO\|FIXME\|HACK\|XXX"`.
+5. **CLAUDE.md / project docs** — conventions and architecture.
 
 ## Objective Confirmation (the only approval gate)
 
@@ -560,17 +544,10 @@ every phase transition. **This file is the source of truth — not your memory.*
           "issues_noted": []
         }
       ]
-    },
-    {
-      "id": 2,
-      "title": "Add retry + circuit-breaker to outbound HTTP clients",
-      "status": "in_progress",
-      "codex_approval_file": "key-results/2/codex-approval.txt",
-      "started_at": "2026-04-19T09:20:00-0700",
-      "tasks": []
     }
   ],
-  "test_results": { "passed": 23, "failed": 2, "total": 25 }
+  "test_results": { "passed": 23, "failed": 2, "total": 25 },
+  "codex_on": false
 }
 ```
 
@@ -703,15 +680,13 @@ to §End Conditions (consensus path) instead.
 
 ### Outer B: Codex Key Result Approval
 
+**Default (`codex_on=false`):** Claude self-evaluates the KR's value — does it serve the objective, and would it over-engineer? Record the reasoning in `proposed-key-result.md`; no external review. Proceed to Outer C.
+
+**`codex_on`:** Codex gates the KR via the review below.
+
 Codex gates each key result. Run an adversarial review on the proposal.
 
-**Pass the full `state.json` to Codex verbatim.** Do NOT paraphrase the
-objective or summarize completed key results — paraphrasing loses the exact
-wording of the user-approved objective and the shape of what's already shipped,
-which is exactly the information Codex needs to judge whether the proposal
-is worth doing or would over-engineer. Include both `state.json` and
-`proposed-key-result.md` in the review context (e.g. quote their contents
-inline in the prompt, or reference both file paths explicitly).
+**Pass `state.json` + `proposed-key-result.md` to Codex verbatim** (quote inline or reference both paths). Never paraphrase — the exact objective wording and shipped-KR shape are what Codex judges against (see §Condition 2 for the full rationale).
 
 ```bash
 # $PROMPT = state.json contents (verbatim) + proposed-key-result.md, bundled
@@ -731,22 +706,7 @@ objective, or would it over-engineer / over-optimize?**
 
 - **Approved** (no P1/P2 findings contesting the key result's value): mark
 `status: "in_progress"`, record `started_at`, proceed to C.
-- **Rejected** (Codex contests the key result): mark `status: "codex-rejected"`, record Codex's reasoning in state. Loop back to A with
-a different proposal. **The revised proposal is a NEW iteration — it
-gets a fresh `proposed-key-result.md`, a new entry in
-`state.key_results[]` (not a mutation of the rejected one), and MUST
-go through Outer B again before decomposition.** Do NOT skip Outer B
-on the assumption that "the revision addresses Codex's feedback so
-re-review is unnecessary" — that's how rejections quietly turn into
-self-approvals where the agent gets to decide which changes were
-"enough" to satisfy Codex. Codex must verify that itself. Rejections
-never auto-terminate
-the shift — if you find yourself unable to propose a key result Codex
-will accept, that's a signal to invoke §End Conditions (Condition 2)
-yourself: write `end-consensus-draft.md`, include the rejected proposals
-and Codex's reasoning as evidence, and let Codex's re-review on the
-full draft decide whether the shift ends or you adopt Codex's
-counter-proposal. Until then, keep iterating or wait for the 8h cap.
+- **Rejected** (Codex contests the key result): mark `status: "codex-rejected"`, record Codex's reasoning, loop back to A. **A revised proposal is a NEW iteration**: fresh `proposed-key-result.md`, new `state.key_results[]` entry, MUST re-pass Outer B before decomposition — never assume the fix satisfies Codex (that's self-approval). If you can't propose anything Codex accepts, invoke §Condition 2 (write `end-consensus-draft.md` citing the rejections); otherwise keep iterating or wait for the 8h cap.
 
 If Codex is unavailable, the agent MUST still write a rigorous
 self-adversarial review to the same file, clearly marked
@@ -771,6 +731,10 @@ the split — don't guess. Keep tasks in the same ballpark as the running
 average so estimates remain useful.
 
 ### Outer D: Decomposition Adversarial Review
+
+**Default (`codex_on=false`):** Claude self-reviews the task split — each task independently meaningful, testable, sized against the running average. Proceed to Outer E.
+
+**`codex_on`:** Codex adversarial review below.
 
 ```bash
 # $PROMPT = state.json (verbatim) + current-decomp.md.
@@ -810,23 +774,11 @@ were blocked — the key result is "as done as it will get").
 completed tasks across all key results. This informs future
 decomposition and end-condition estimates.
 - `rm "$RUN_DIR/current-decomp.md"` and `rm "$RUN_DIR/proposed-key result.md"`.
-- **Full skill refresh.** Re-read the entire skill spec from disk
-  before proposing the next key result. Inner 0's per-task refresh
-  only re-reads `INVARIANTS.md` (the 12 non-negotiables); the long
-  procedural spec drifts out of context after multi-hour multi-task
-  KRs, leading to skipped artifacts, wrong status values, and stale
-  prompt scaffolds. The KR boundary is the natural reset point:
-
+- **Full skill refresh at the KR boundary.** Inner 0 only re-reads `INVARIANTS.md`; the long procedural spec drifts after multi-hour KRs (skipped artifacts, stale scaffolds). Re-read the actual files from disk — don't skim:
   ```bash
   SKILL_DIR=$(jq -r .skill_dir "$RUN_DIR/state.json")
-  cat "$SKILL_DIR/SKILL.md"
-  cat "$SKILL_DIR/INVARIANTS.md"
+  cat "$SKILL_DIR/SKILL.md"; cat "$SKILL_DIR/INVARIANTS.md"
   ```
-
-  Read the actual file — do not summarize, skim, or skip on the
-  basis of "I remember the spec." After hours of work and multiple
-  compactions, your memory of the spec is wrong; the disk is the
-  source of truth.
 - Return to **Outer 0**.
 
 ---
@@ -842,9 +794,7 @@ cat "$RUN_DIR/state.json"          # Where are we exactly?
 cat "$RUN_DIR/current-decomp.md"   # What's the parent goal's plan?
 ```
 
-This is the single most important defense against context compaction. After
-hours of work and multiple compactions, your memory of the skill rules can be
-wrong. The files on disk are the source of truth. Always re-read them.
+This is the single most important defense against compaction — disk is truth, memory is not.
 
 ### Inner 1: Task Plan
 
@@ -901,6 +851,10 @@ task's work.
   **Do NOT delegate Inner 0, 1, 3, 4, 5, or 6.**
 
 ### Inner 3: Code Review Loop (Codex) — with file gate
+
+**Default (`codex_on=false`):** Claude self-reviews — re-read every changed file with fresh eyes, run the full test suite, and write `code-review.txt` with a header line `SELF-REVIEW (no Codex)` followed by your findings. Set `code_review_status: "self-reviewed"`. Proceed to Inner 4.
+
+**`codex_on`:** run the Codex review loop below (until no P1/P2, or revert after 10 rounds).
 
 **Run the drift check** before the first review round.
 
@@ -991,18 +945,16 @@ to a branch where every commit is green, even if fewer tasks completed.
 
 **Pre-commit structural gate.** Before staging anything, verify ALL of:
 
-1. `state.key_results[G].tasks[S].code_review_status` is either `"clean"`
-   OR `"self-reviewed-unavailable"` (no other value passes the gate)
+1. `state.key_results[G].tasks[S].code_review_status` is one of `"clean"` (Codex),
+   `"self-reviewed"` (default self-review), or `"self-reviewed-unavailable"` (Codex errored)
 2. `state.key_results[G].tasks[S].code_review_file` is set AND the file
    exists AND is non-empty
-3. The file contains a Codex verdict line (the `code_review_evidence` stored
-   in state matches a line in the file)
-4. **If `code_review_status == "self-reviewed-unavailable"`,** the file
-   MUST also contain the literal header line beginning with
-   `CODEX UNAVAILABLE — SELF-REVIEW`. This is what distinguishes an honest
-   Codex-down self-review from a fabricated `code-review.txt` written to
-   bypass the gate.
-5. `state.key_results[G].tasks[S].pre_files_recorded == true` AND the file
+3. The file contains the header matching its status: a Codex verdict line
+   (`code_review_evidence` matches) when `"clean"`; a `SELF-REVIEW` line when
+   `"self-reviewed"`; a `CODEX UNAVAILABLE — SELF-REVIEW` line when
+   `"self-reviewed-unavailable"`. This distinguishes a real review from a
+   fabricated file written to bypass the gate.
+4. `state.key_results[G].tasks[S].pre_files_recorded == true` AND the file
    `pre-files.txt` exists in the task folder. Without it, scoped rollback
    cannot run cleanly if a later task needs to revert this one.
 
@@ -1014,10 +966,10 @@ PRE_FILES="$RUN_DIR/key-results/<G>/tasks/<S>/pre-files.txt"
 [ -s "$PRE_FILES" ]  || { echo "FATAL: pre-files.txt missing — Inner 2 was skipped"; exit 1; }
 grep -qF "$CODE_REVIEW_EVIDENCE" "$REVIEW_FILE" || { echo "FATAL: verdict line not in file"; exit 1; }
 
-if [ "$CODE_REVIEW_STATUS" = "self-reviewed-unavailable" ]; then
-  grep -qE '^CODEX UNAVAILABLE — SELF-REVIEW' "$REVIEW_FILE" \
-    || { echo "FATAL: self-review claimed but header missing"; exit 1; }
-fi
+case "$CODE_REVIEW_STATUS" in
+  self-reviewed)             grep -qE '^SELF-REVIEW' "$REVIEW_FILE" || { echo "FATAL: SELF-REVIEW header missing"; exit 1; } ;;
+  self-reviewed-unavailable) grep -qE '^CODEX UNAVAILABLE — SELF-REVIEW' "$REVIEW_FILE" || { echo "FATAL: header missing"; exit 1; } ;;
+esac
 ```
 
 If any of this fails, the task CANNOT be committed — revert it. Hard
@@ -1172,6 +1124,8 @@ This is a wall-clock cap, not a "target" — 8h is the ceiling, not a goal.
 
 ### Condition 2: Dual Consensus — the objective is done
 
+**Only when `codex_on`.** Default (`codex_on=false`) ends only at Condition 1 (8h cap) — the agent cannot self-judge "done". The dual-consensus path below runs only when Codex is enabled.
+
 The agent proposes "we're done" → Codex must agree before handoff fires.
 This prevents the agent from ending early on its own.
 
@@ -1258,23 +1212,7 @@ articulate any KR that would still measurably advance the objective,
 you are not done — even if that KR is messy, ambitious, or unlikely
 to finish cleanly.
 
-**Not valid as "done" rationale.** If the agent's honest framing of
-*why we're done* reduces to any of the items below, it MUST NOT write
-`end-consensus-draft.md` at all. Return to Outer A and propose another
-key result instead. These reasons are categorically insufficient
-because they describe a *stopping preference*, not the objective being
-fulfilled or further work being harmful:
-
-- "Diminishing returns" / "remaining work is lower-value"
-- "Rest deferred to ROADMAP / future shift / TODO file / next session"
-- "Foundation in place" / "natural stopping point" / "good break here"
-- "Cleaner to ship what we have than fold in more"
-- **"Not enough time left in the 8-hour cap to fit another KR."**
-  Time estimates CANNOT justify ending early. The agent's runway
-  estimates are unreliable, and Condition 1 + the handoff procedure
-  exist precisely so the agent never has to predict whether the next
-  KR will finish — start it, and if the cap fires mid-task, the cap
-  path handles it cleanly. Run out the clock.
+**Not valid as "done" rationale.** The stopping-preference items in the Codex scaffold above (and Invariant #6) are never sufficient — if your honest "why done" reduces to any of them, do NOT write `end-consensus-draft.md`; return to Outer A and propose another KR.
 
 There is no Codex-initiated end path. Repeated Outer B rejections are a
 signal *to the agent* that it should write `end-consensus-draft.md` and run
@@ -1321,35 +1259,6 @@ runway estimates are unreliable; Condition 1 (hard cap) + the handoff
 procedure handle the actual-cap-fires case cleanly. Always start the
 next KR if the objective still needs work — see §Condition 2 for the
 list of insufficient "done" rationales.
-
-## Codex Unavailability
-
-**"Unavailable" = Codex returned a technical error** (command not found,
-timeout, runtime crash). It does NOT mean you decided to skip it. Choosing to
-skip Codex is a protocol violation, not an unavailability event. Skipping
-Outer B, Outer D, or Inner 3 by choice means the task MUST be reverted.
-
-If Codex is genuinely unavailable:
-
-- **Adversarial review (Outer B / Outer D):** Proceed without it — adversarial
-review is valuable but not the primary quality gate. Write a short note to
-the corresponding adversarial file (e.g. `decomp-adversarial.txt`) containing
-`"UNAVAILABLE: <error message>"` so the artifact still exists. Record the
-skip in state.json.
-- **Code review (Inner 3):** Primary quality gate. If unavailable:
-  - Perform a self-review: re-read all changed files with fresh eyes.
-  - Run the test suite as the minimum quality bar.
-  - Write the self-review output to the task's `code-review.txt` with
-  a clearly-marked header: `"CODEX UNAVAILABLE — SELF-REVIEW: <error>"`
-  followed by your notes.
-  - Record `code_review_status: "self-reviewed-unavailable"` in state.json
-  (a distinct value from `"clean"`).
-  - The pre-commit structural gate still requires the file to exist and
-  be non-empty — the self-review artifact satisfies that.
-  - The handoff MUST prominently flag that these tasks were not Codex-reviewed.
-
-No other reason justifies skipping Codex — not "straightforward changes", not
-"UI-only work", not "tests pass". Run it.
 
 ## Handoff (End of Successful Shift)
 
@@ -1636,32 +1545,13 @@ the user must review and clean them up manually.
   the task (git mode) or mark it blocked (degrade mode) and move on.
 - **Merge conflicts:** Should not happen since no one else is committing to
   this branch. If they do, treat as drift — stop the run and write the handoff.
-- **Codex unavailable:** See §Codex Unavailability.
+- **Codex unavailable:** fall back to self-review with header `CODEX UNAVAILABLE — SELF-REVIEW` (Invariant #14).
 
 ## Principles
 
-1. **Every commit must be green.** (Git mode.) Never commit code that doesn't
-   pass tests. Revert rather than leave broken code.
-2. **Leave no broken windows.** Never leave the codebase in a worse state than
-   you found it. Use scoped rollback to undo only the failed task's changes.
-3. **Document your judgment calls.** Every decision made without the human
-   goes in state.json and the handoff.
-4. **Trust the review loop.** Claude↔Codex review cycle is the quality gate.
-   If the gate can't run, flag it loudly. The structural file gate exists so
-   that a compacted, forgetful agent cannot quietly skip it.
-5. **Refresh the rules.** Re-read `INVARIANTS.md` and `state.json` at the top
-   of every task. Your memory of this skill will be wrong after a few
-   hours; the disk is the source of truth.
-6. **Stay in your lane.** Only work within approved goals. Task expansion
-   must stay in the goal's subject matter; autonomous additions must be flagged.
-7. **Never push.** Never push to remote. The human decides when to push.
-8. **State file is truth.** Always update and re-read state.json. Don't trust
-   your memory for multi-hour runs.
-9. **Runs are independent.** Each shift gets its own folder under
-   `.evercode/runs/RUN_ID/`. Previous runs are history, not to be modified
-   or appended to.
-10. **End only on consensus or cap.** The shift ends either when Codex and
-    the agent agree further work would be over-engineering, or when 8
-    hours have elapsed. The agent cannot end on its own. See §End Conditions.
+The non-negotiable rules live in `INVARIANTS.md` (re-read every task via Inner 0). Two emphases unique to this spec:
+
+- **Scoped rollback, not whole-tree.** A failed task reverts only its own changes; completed tasks stay committed.
+- **State file is truth.** Update and re-read `state.json` every phase transition — memory is wrong after hours; disk is not.
 ```
 

@@ -1,7 +1,7 @@
 {
   "name": "evercode",
   "description": "Autonomous, around-the-clock development agent that keeps coding while the human is away — small, reversible, dual-LLM-reviewed commits for up to 8 hours on a feature branch.",
-  "version": "1.1.3",
+  "version": "1.2.0",
   "author": {
     "name": "Honglei Liu",
     "url": "https://github.com/taptapon"
