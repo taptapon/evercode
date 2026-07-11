@@ -1,0 +1,11 @@
+# Evercode Flush Proxy — runtime artifacts
+proxy/proxy.log
+proxy/__pycache__/
+__pycache__/
+*.pyc
+
+# codegraph MCP index (tool artifact)
+.codegraph/
+
+# evercode run state (created by the skill at runtime)
+.evercode/

@@ -1,27 +1,27 @@
 ---
-name: night-shift
+name: evercode
 description: >
-  Autonomous agent that runs while the human is away. Trigger with "/night-shift"
-  or phrases like "start night shift", "going to sleep", "take over for the night",
+  Autonomous agent that runs while the human is away. Trigger with "/evercode"
+  or phrases like "start evercode", "keep coding", "take over",
   "keep working while I'm away". The skill routes based on context: if no shift
   is active, it starts one; if a shift is already active, it prompts Stop / Resume
-  / Abandon. Stop phrases like "stop night shift" or "end night shift" run the
+  / Abandon. Stop phrases like "stop evercode" or "end evercode" run the
   end procedure directly. The user approves ONE thing — an objective. Key Results
   and their tasks are decided iteratively during execution, each gated by a
   Codex review. The shift ends either when Codex and the agent agree further
   work would be over-engineering, or at an 8-hour hard cap. Each shift is an
-  independent run with its own folder under `.night-shift/runs/<RUN_ID>/`;
+  independent run with its own folder under `.evercode/runs/<RUN_ID>/`;
   previous runs are kept as history. Use this any time the user wants unattended
-  autonomous work or overnight runs.
+  autonomous work or long-running sessions.
 ---
-# Night Shift
+# Evercode
 
-You are entering autonomous mode. The human is stepping away — sleeping, taking a
+You are entering autonomous mode. The human is stepping away — into a meeting, taking a
 break, or otherwise unavailable. Your job is to make meaningful progress on their
 codebase without asking any questions after the initial goal confirmation.
 
 This skill has a **single unified entrypoint**. On invocation, route based on
-(a) whether an active night shift exists and (b) the user's phrasing.
+(a) whether an evercode run is active and (b) the user's phrasing.
 
 **A note on OKR vocabulary.** This skill borrows three terms from the OKR
 framework — **objective** (aspirational direction the user sets), **key
@@ -38,9 +38,9 @@ the objective?" not "is this measurable?".
 First, detect whether any active shift exists:
 
 ```bash
-# Active = any .night-shift/runs/*/state.json with status == "running".
+# Active = any .evercode/runs/*/state.json with status == "running".
 # No shell variables named `status` — zsh makes `$status` read-only.
-for f in .night-shift/runs/*/state.json; do
+for f in .evercode/runs/*/state.json; do
   [ -e "$f" ] || continue
   [ "$(jq -r .status "$f" 2>/dev/null)" = "running" ] && echo "$f"
 done
@@ -59,10 +59,10 @@ Then route:
 
 | Phrasing                                                                      | Active shift? | Action                                                    |
 | ----------------------------------------------------------------------------- | ------------- | --------------------------------------------------------- |
-| start/go trigger (e.g. "start night shift", "/night-shift", "going to sleep") | No            | Begin fresh shift → §Pre-flight                           |
+| start/go trigger (e.g. "start evercode", "/evercode", "keep coding") | No            | Begin fresh shift → §Pre-flight                           |
 | start/go trigger                                                              | Yes           | Prompt **Stop / Resume / Abandon** → §Stop-Resume-Abandon |
-| stop trigger (e.g. "stop night shift", "end night shift", "wrap up")          | Yes           | Run end procedure → §Ending a Shift                       |
-| stop trigger                                                                  | No            | Reply: "No active night shift to stop." Stop.             |
+| stop trigger (e.g. "stop evercode", "end evercode", "wrap up")          | Yes           | Run end procedure → §Ending a Shift                       |
+| stop trigger                                                                  | No            | Reply: "No active evercode run to stop." Stop.             |
 
 
 ## Pre-flight (new shift)
@@ -84,7 +84,7 @@ and checks whether a newer version of the skill exists upstream. If so, it
 pulls it in. The check is fast (one `curl` to a GitHub raw URL) so it runs
 on every shift — no throttling.
 
-Updates apply to the **next** `/night-shift` invocation — Claude has already
+Updates apply to the **next** `/evercode` invocation — Claude has already
 loaded the current SKILL.md into context, so hot-swapping the running shift
 is not possible. That is fine: the shift in progress completes on the loaded
 version, the next one picks up the update.
@@ -97,7 +97,7 @@ PLUGIN_KEY=""
 if [ -f "$INSTALLED_JSON" ] && command -v jq >/dev/null 2>&1; then
   PLUGIN_KEY=$(jq -r '
     .plugins // {} | to_entries[]
-    | select(.key | startswith("night-shift@"))
+    | select(.key | startswith("evercode@"))
     | .key
   ' "$INSTALLED_JSON" 2>/dev/null | head -1)
   if [ -n "$PLUGIN_KEY" ]; then
@@ -107,8 +107,8 @@ if [ -f "$INSTALLED_JSON" ] && command -v jq >/dev/null 2>&1; then
   fi
 fi
 if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
-  if [ -f "$HOME/.claude/skills/night-shift/.claude-plugin/plugin.json" ]; then
-    SKILL_DIR="$HOME/.claude/skills/night-shift"
+  if [ -f "$HOME/.claude/skills/evercode/.claude-plugin/plugin.json" ]; then
+    SKILL_DIR="$HOME/.claude/skills/evercode"
     PLUGIN_KEY=""   # clone install — no marketplace key
   else
     SKILL_DIR=""    # could not resolve — auto-update will be skipped
@@ -121,18 +121,18 @@ if [ -n "$SKILL_DIR" ]; then
   LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
   LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
   REMOTE_VER=$(curl -fsS --max-time 5 \
-    "https://raw.githubusercontent.com/ppuliu/night-shift/main/.claude-plugin/plugin.json" \
+    "https://raw.githubusercontent.com/ppuliu/evercode/main/.claude-plugin/plugin.json" \
     2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
 
   if [ -n "$LOCAL_VER" ] && [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" != "$REMOTE_VER" ] \
      && [ "$(printf '%s\n%s\n' "$LOCAL_VER" "$REMOTE_VER" | sort -V | tail -1)" = "$REMOTE_VER" ]; then
     if git -C "$SKILL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
       git -C "$SKILL_DIR" pull --ff-only --quiet 2>/dev/null \
-        && echo "night-shift: updated $LOCAL_VER → $REMOTE_VER (git clone). Active on next /night-shift run."
+        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (git clone). Active on next /evercode run."
     else
-      TARGET="${PLUGIN_KEY:-night-shift}"
+      TARGET="${PLUGIN_KEY:-evercode}"
       claude plugin update "$TARGET" >/dev/null 2>&1 \
-        && echo "night-shift: updated $LOCAL_VER → $REMOTE_VER (plugin). Active on next /night-shift run."
+        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (plugin). Active on next /evercode run."
     fi
   fi
 fi
@@ -148,7 +148,7 @@ silently. This step must never block a shift from starting.
 
 ### 2. Bypass-permissions confirmation
 
-Night shift is fully autonomous — it runs many tool calls and edits without human
+Evercode is fully autonomous — it runs many tool calls and edits without human
 input. If Claude Code is NOT launched with `--dangerously-skip-permissions`, the
 loop will stall on permission prompts while the user is away.
 
@@ -163,7 +163,7 @@ Before I start: is this session running in bypass-permissions mode
 Without it, the autonomous loop will stall on permission prompts while you're away.
 
 Reply "yes" to proceed, or "no" to abort — in which case, relaunch Claude Code
-with the flag and trigger night shift again.
+with the flag and trigger evercode again.
 ```
 
 If the user says no → abort with the above instructions. If yes → continue.
@@ -207,7 +207,7 @@ machinery runs.
 - **No git repo → graceful-degrade mode.** See §Non-Git Degrade Mode for the
 limitations. Warn the user once and ask for confirmation before proceeding:
   ```
-  This directory is not a git repo. Night shift will run in degrade mode:
+  This directory is not a git repo. Evercode will run in degrade mode:
   no commits, no rollback, no drift protection. Failed goals may leave partial
   changes in your working tree. Proceed?
   ```
@@ -215,13 +215,13 @@ limitations. Warn the user once and ask for confirmation before proceeding:
 
 ### 5. Gitignore entry (git mode only)
 
-Ensure `.night-shift/` is ignored. Read `.gitignore` (create if missing) and
-append `.night-shift/` on its own line if not already present. This is a one-line
+Ensure `.evercode/` is ignored. Read `.gitignore` (create if missing) and
+append `.evercode/` on its own line if not already present. This is a one-line
 diff the user will see alongside their other changes — expected and explicit.
 
 ```bash
-if ! grep -qxF '.night-shift/' .gitignore 2>/dev/null; then
-  printf '\n.night-shift/\n' >> .gitignore
+if ! grep -qxF '.evercode/' .gitignore 2>/dev/null; then
+  printf '\n.evercode/\n' >> .gitignore
 fi
 ```
 
@@ -234,7 +234,7 @@ Run `git branch --show-current`. Must not be `main` or `master`.
 
 - If on `main` or `master`: **propose creating a new branch** rather than
 waiting for the user. Suggest a descriptive name based on session context
-(e.g., `night-shift/YYYY-MM-DD` or `feat/<topic>` inferred from the
+(e.g., `evercode/YYYY-MM-DD` or `feat/<topic>` inferred from the
 conversation). Ask for confirmation or a different name. On confirmation,
 run `git checkout -b <name>` and proceed.
 - On any other branch: proceed on it.
@@ -248,12 +248,12 @@ Run `git status --short`. If there are uncommitted changes (other than the
 the only other permitted question besides goal confirmation.
 
 If the `.gitignore` change is the only dirty file, commit it automatically
-with message `chore: ignore .night-shift/` before proceeding.
+with message `chore: ignore .evercode/` before proceeding.
 
 ### 8. Active-shift guard
 
 This should have been handled in §Routing, but guard against races: re-scan
-`.night-shift/runs/*/state.json` and verify no `status: "running"` entry exists.
+`.evercode/runs/*/state.json` and verify no `status: "running"` entry exists.
 If one appeared between routing and here, loop back to §Stop-Resume-Abandon.
 
 ### 9. Initialize this run
@@ -266,7 +266,7 @@ append `Z`.
 
 ```bash
 RUN_ID=$(date +%Y-%m-%d-%H%M)                              # local time
-RUN_DIR=".night-shift/runs/${RUN_ID}"
+RUN_DIR=".evercode/runs/${RUN_ID}"
 mkdir -p "$RUN_DIR/key results"
 ```
 
@@ -315,8 +315,8 @@ reachable before proceeding:
 ```bash
 test -f "$SKILL_DIR/INVARIANTS.md" || {
   # Last-ditch fallback: §1's probe failed AND state.json's skill_dir is bogus.
-  if [ -f "$HOME/.claude/skills/night-shift/INVARIANTS.md" ]; then
-    SKILL_DIR="$HOME/.claude/skills/night-shift"
+  if [ -f "$HOME/.claude/skills/evercode/INVARIANTS.md" ]; then
+    SKILL_DIR="$HOME/.claude/skills/evercode"
     jq --arg sd "$SKILL_DIR" '.skill_dir = $sd' "$RUN_DIR/state.json" \
       > "$RUN_DIR/state.json.tmp" && mv "$RUN_DIR/state.json.tmp" "$RUN_DIR/state.json"
   else
@@ -334,7 +334,7 @@ Aborting here is correct: every per-task refresh in §Inner 0 reads
 Before scanning anything, ask the user one question:
 
 ```
-Do you have a high-level objective for tonight — something like
+Do you have a high-level objective — something like
 "improve the checkout flow" or "harden error handling in the API layer" —
 or should I propose goals based on session context?
 
@@ -382,7 +382,7 @@ pay.
 verbatim and ask for confirmation (single yes/no). Example:
 
 ```
-Objective for tonight: "Harden error handling in the API layer"
+Objective: "Harden error handling in the API layer"
 
 I'll decide key results iteratively as I go, with Codex reviewing each one.
 The shift ends when Codex and I agree further work would be over-engineering,
@@ -415,7 +415,7 @@ want. Use emojis and dividers so it stands out from ordinary output:
 
 ```
 ═══════════════════════════════════════════════════════════════
-  🌙  NIGHT SHIFT ENGAGED  🌙
+  ⚙️  EVERCODE ENGAGED  ⚙️
 ═══════════════════════════════════════════════════════════════
 
   You can step away now. I'll take it from here.
@@ -424,12 +424,12 @@ want. Use emojis and dividers so it stands out from ordinary output:
   Branch:      BRANCH (from BASE_COMMIT)          [git mode only]
   Objective:  <one-line summary>
   Max runtime: 8 hours (or until Codex and I agree we're done)
-  Handoff:     .night-shift/runs/RUN_ID/handoff.md
+  Handoff:     .evercode/runs/RUN_ID/handoff.md
 
-  Say "end night shift" any time to stop early.
+  Say "end evercode" any time to stop early.
   Type /remote-control to monitor from your phone or browser.
 
-  Sleep well. 🌙
+  Evercode keeps coding. ⚙️
 ═══════════════════════════════════════════════════════════════
 ```
 
@@ -535,7 +535,7 @@ refresh context after any compaction. See §Per-Task Context Refresh.
 
 ## Drift Check (git mode only)
 
-Since night shift works directly on the user's feature branch, the branch or
+Since evercode works directly on the user's feature branch, the branch or
 HEAD could change underneath the run (user makes a commit, rebases, switches
 branches).
 
@@ -548,7 +548,7 @@ Before any step that writes, commits, or rolls back:
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
 CURRENT_HEAD=$(git rev-parse HEAD)
-UNEXPECTED_CHANGES=$(git status --porcelain=v1 -z | tr '\0' '\n' | grep -v '.night-shift/')
+UNEXPECTED_CHANGES=$(git status --porcelain=v1 -z | tr '\0' '\n' | grep -v '.evercode/')
 ```
 
 Verify:
@@ -831,7 +831,7 @@ task's work.
   - "Only create/modify files listed in the plan"
   - "Report all files changed when done"
 
-  The night shift agent MUST then independently run Inner 3–6 itself. A
+  The evercode agent MUST then independently run Inner 3–6 itself. A
   subagent's "done" is NOT evidence of quality. The Codex review is.
 
   **Do NOT delegate Inner 0, 1, 3, 4, 5, or 6.**
@@ -918,7 +918,7 @@ on the fixes
   - **Degrade mode:** mark task `blocked`, record failures. Partial
   changes remain in the working tree — flag in handoff.
 
-**Principle: never commit code that doesn't pass tests.** The human wakes up
+**Principle: never commit code that doesn't pass tests.** The human comes back
 to a branch where every commit is green, even if fewer tasks completed.
 
 ### Inner 5: Commit (git mode) / Record (degrade mode)
@@ -974,7 +974,7 @@ Commit:
 ```
 [[ORCA_RAW_HTML_INLINE:%3Ctype%3E]]: [task title]
 
-Night shift key result [[ORCA_RAW_HTML_INLINE:%3CG%3E]] ("[[ORCA_RAW_HTML_INLINE:%3Ckey%20result%20title%3E]]"), task [[ORCA_RAW_HTML_INLINE:%3CS%3E]]/[[ORCA_RAW_HTML_INLINE:%3Ctotal%3E]]:
+Evercode key result [[ORCA_RAW_HTML_INLINE:%3CG%3E]] ("[[ORCA_RAW_HTML_INLINE:%3Ckey%20result%20title%3E]]"), task [[ORCA_RAW_HTML_INLINE:%3CS%3E]]/[[ORCA_RAW_HTML_INLINE:%3Ctotal%3E]]:
 - [key change 1]
 - [key change 2]
 ```
@@ -990,6 +990,23 @@ Update state.json:
 
 **Degrade mode:** no commit. Update state.json same way but with
 `commit: null`. Changes remain in the working tree.
+
+### Inner 5.5: Flush-proxy sentinel (optional)
+
+If the evercode flush proxy is on the API path (env `EVERCODE_FLUSH_PROXY=1`),
+emit a **unique** sentinel now so the proxy trims conversation history at this
+task boundary:
+
+```bash
+[ "${EVERCODE_FLUSH_PROXY:-0}" = "1" ] && printf '\n<<EC_FLUSH:%s>>\n' "$(date +%s)"
+```
+
+Why this is safe: evercode recovers full state from disk via **Inner 0** every
+task, so dropping earlier turns costs nothing. The timestamp makes each sentinel
+unique, and the proxy consumes each id exactly once — so it trims once per task
+and never re-trims on later turns. If the proxy is not in the path
+(`EVERCODE_FLUSH_PROXY` unset), the line prints nothing and is a complete
+no-op; non-proxy users are unaffected. See `proxy/README.md`.
 
 ### Inner 6: Update State and Next Task
 
@@ -1108,7 +1125,7 @@ key result would over-engineer or over-optimize the objective:
    "time remaining" or "diminishing returns":
 
    ```
-   You are adversarially reviewing a night-shift agent's draft argument
+   You are adversarially reviewing a evercode agent's draft argument
    that the shift should end (Condition 2: dual consensus).
 
    Inputs:
@@ -1278,7 +1295,7 @@ When the shift ends (consensus or 8-hour cap):
 4. Set run `status: "completed"` and `completed_at` in state.json.
 5. **Do NOT delete the run folder.** Previous runs are kept as history under
 
-  `.night-shift/runs/`. Each run's `handoff.md` is the authoritative
+  `.evercode/runs/`. Each run's `handoff.md` is the authoritative
    user-facing record for that run.
 
 If the user wants the handoff committed to the repo, they can do that
@@ -1288,7 +1305,7 @@ handoff is private notes, not a repo artifact.
 Handoff structure:
 
 ```markdown
-# Night Shift Handoff — RUN_ID
+# Evercode Handoff — RUN_ID
 
 ## Summary
 [2-3 sentences: what was accomplished overall, in terms of the large goals]
@@ -1338,7 +1355,7 @@ Handoff structure:
 
 ## How to Review                                  [git mode only]
 ```bash
-# All night shift commits (one per task, grouped under goals in this handoff)
+# All evercode commits (one per task, grouped under goals in this handoff)
 git log BASE_COMMIT..HEAD --oneline
 
 # Full diff
@@ -1347,7 +1364,7 @@ git diff BASE_COMMIT
 # Revert a specific task's commit
 git revert <commit-hash>
 
-# Or undo all night shift work
+# Or undo all evercode work
 git reset --hard BASE_COMMIT
 ```
 
@@ -1369,7 +1386,7 @@ paraphrase, do not compose a new one — copy it).
 
 ```
 ══════════════════════════════════════════════════════════════════════
-  NIGHT SHIFT ENDED — <end_reason>
+  EVERCODE ENDED — <end_reason>
 ══════════════════════════════════════════════════════════════════════
 
   <headline — verbatim first sentence of handoff ## Summary>
@@ -1383,8 +1400,8 @@ paraphrase, do not compose a new one — copy it).
   Commits:   N new since BASE_COMMIT                 [git mode only]
   Review:    git log BASE_COMMIT..HEAD --oneline     [git mode only]
 
-  Handoff:   .night-shift/runs/RUN_ID/handoff.md
-  Run dir:   .night-shift/runs/RUN_ID/
+  Handoff:   .evercode/runs/RUN_ID/handoff.md
+  Run dir:   .evercode/runs/RUN_ID/
 
 ──────────────────────────────────────────────────────────────────────
   KEY RESULTS  (T total · C completed · B blocked · R reverted/superseded)
@@ -1442,7 +1459,7 @@ user:
 
 ```
 
-Found an active night shift:
+Found an active evercode:
   Run ID: RUN_ID
   Branch: BRANCH
   Started: STARTED_AT
@@ -1496,7 +1513,7 @@ Identical to §Ending a Shift Early below — the shared end procedure.
 
 ## Ending a Shift Early (Stop)
 
-Triggered by "stop night shift", "end night shift", etc., when an active shift
+Triggered by "stop evercode", "end evercode", etc., when an active shift
 exists. Also the Stop path from §Stop/Resume/Abandon.
 
 1. Finish the current atomic operation — don't leave broken code mid-edit.
@@ -1520,7 +1537,7 @@ exists. Also the Stop path from §Stop/Resume/Abandon.
 
 ## Non-Git Degrade Mode
 
-When night shift runs outside a git repo, it degrades gracefully. The execution
+When evercode runs outside a git repo, it degrades gracefully. The execution
 loop and Codex reviews still run, but these guarantees are gone:
 
 | Feature             | Git mode | Degrade mode |
@@ -1530,7 +1547,7 @@ loop and Codex reviews still run, but these guarantees are gone:
 | Drift check         | Yes      | No — can't detect external branch/HEAD changes |
 | Every-commit-green  | Yes      | N/A — nothing is committed |
 | Structural file gate | Yes     | Yes — `code-review.txt` still required |
-| Handoff location    | `.night-shift/runs/RUN_ID/handoff.md` (file only) | `.night-shift/runs/RUN_ID/handoff.md` (file only) |
+| Handoff location    | `.evercode/runs/RUN_ID/handoff.md` (file only) | `.evercode/runs/RUN_ID/handoff.md` (file only) |
 
 Prominently flag the limitations in the handoff. If a task fails
 validation in degrade mode, its partial changes stay in the working tree —
@@ -1564,7 +1581,7 @@ the user must review and clean them up manually.
 8. **State file is truth.** Always update and re-read state.json. Don't trust
    your memory for multi-hour runs.
 9. **Runs are independent.** Each shift gets its own folder under
-   `.night-shift/runs/RUN_ID/`. Previous runs are history, not to be modified
+   `.evercode/runs/RUN_ID/`. Previous runs are history, not to be modified
    or appended to.
 10. **End only on consensus or cap.** The shift ends either when Codex and
     the agent agree further work would be over-engineering, or when 8

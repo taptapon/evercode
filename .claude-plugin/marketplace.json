@@ -1,14 +1,14 @@
 {
-  "name": "night-shift",
+  "name": "evercode",
   "owner": {
     "name": "Honglei Liu",
     "url": "https://github.com/ppuliu"
   },
   "plugins": [
     {
-      "name": "night-shift",
+      "name": "evercode",
       "source": "./",
-      "description": "Autonomous overnight agent that keeps coding while the human is away.",
+      "description": "Autonomous, around-the-clock development agent that keeps coding while the human is away.",
       "version": "1.0.2"
     }
   ]

@@ -1,4 +1,4 @@
-# Night Shift Invariants (read before every task)
+# Evercode Invariants (read before every task)
 
 These rules are NON-NEGOTIABLE. Context compaction is not an excuse. "Time
 efficiency" is not an excuse. "Simple change" is not an excuse.
