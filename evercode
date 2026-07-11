@@ -21,6 +21,21 @@
 set -euo pipefail
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Refuse to launch from the install directory. The launcher never changes cwd,
+# so Claude Code would start here (the skill install) instead of in the user's
+# project. Call evercode by absolute path or PATH alias from inside the project
+# you want worked on.
+if [ "$(pwd)" = "$DIR" ]; then
+  cat >&2 <<EOF
+evercode: your current directory is the install directory.
+  Claude Code would start here, not in your project. cd into the project you
+  want worked on, then call evercode by absolute path or PATH alias:
+    cd ~/my-project && evercode --dangerously-skip-permissions
+EOF
+  exit 1
+fi
+
 PORT="${EVERCODE_PROXY_PORT:-5589}"
 PROXY_URL="http://127.0.0.1:${PORT}"
 

@@ -348,6 +348,17 @@ case "${ANTHROPIC_BASE_URL:-}" in *":${PORT}") PROXY_ON_PATH=1 ;; esac
 HEALTH_OK=0
 [ "$PROXY_ON_PATH" = "1" ] && \
   curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && HEALTH_OK=1
+
+# Build an absolute, copy-pasteable relaunch command for the Not-detected prompt.
+# The user is inside a CC session whose cwd IS their project dir; ./evercode and
+# ./proxy/run.sh do NOT exist there — the launcher must be invoked by ABSOLUTE
+# path ($SKILL_DIR, resolved in §1), and CC must be relaunched in that same dir.
+LAUNCHER="$SKILL_DIR/evercode"
+if [ -x "$LAUNCHER" ]; then
+  RELAUNCH_CMD="cd \"$PWD\" && \"$LAUNCHER\" --dangerously-skip-permissions"
+else
+  RELAUNCH_CMD="cd \"$PWD\" && ANTHROPIC_BASE_URL=http://127.0.0.1:${PORT} EVERCODE_FLUSH_PROXY=1 claude --dangerously-skip-permissions   # start \"$SKILL_DIR/proxy/run.sh\" first"
+fi
 ```
 
 Then branch — **ask at most one question**, per the one-at-a-time pre-flight rule:
@@ -362,22 +373,17 @@ Then branch — **ask at most one question**, per the one-at-a-time pre-flight r
   sentinels? (recommended for long runs) (yes / no)
   ```
   yes → `flush_proxy: true`; no → `flush_proxy: false`.
-- **Not detected** → ask:
+- **Not detected** → echo `$RELAUNCH_CMD` (a ready-to-run command resolved to
+  absolute paths and your current project dir), then ask:
   ```
-  Enable the flush proxy? It trims conversation history at task boundaries.
-  NOTE: the proxy must be on your API path, which is fixed at Claude Code launch
-  — it is NOT currently detected. To use it, easiest is the one-command launcher:
-    ./evercode --dangerously-skip-permissions
-  which starts the proxy, sets ANTHROPIC_BASE_URL + EVERCODE_FLUSH_PROXY=1, and
-  launches Claude Code for you. Or manually:
-    1. ./proxy/run.sh                         (separate shell)
-    2. relaunch Claude Code with ANTHROPIC_BASE_URL=http://127.0.0.1:5589
-       and EVERCODE_FLUSH_PROXY=1
-    3. re-trigger evercode
-  Enable now? (yes / no)
+  Flush proxy not detected on your API path. It trims conversation history at
+  task boundaries to keep long runs lean, but it must sit on the API path —
+  which is fixed at Claude Code launch, so it can't be hot-plugged into this
+  session. Exit Claude Code, paste the command above into your shell, then
+  re-run /evercode. Enable now? (yes / no)
   ```
-  yes → print the steps above and **abort this shift** (do not silently
-  proceed without flushing). no → `flush_proxy: false`, continue.
+  yes → echo `$RELAUNCH_CMD` once more and **abort this shift** (do not
+  silently proceed without flushing). no → `flush_proxy: false`, continue.
 
 Write the decision to `state.json.flush_proxy` (boolean). This field — not the
 env var — is what Inner 5.5 reads to decide whether to emit sentinels, so the

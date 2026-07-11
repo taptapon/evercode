@@ -89,6 +89,18 @@ echo
 if [ "$DRY" = "0" ]; then
   echo "installed → $DEST"
   echo "restart Claude Code (or start a new session) to register the skill."
+
+  # Expose the launcher on PATH. The launcher never changes cwd, so users can
+  # run `evercode` from any project dir and CC starts there.
+  BIN_DIR="$HOME/.local/bin"
+  mkdir -p "$BIN_DIR"
+  ln -sf "$DEST/evercode" "$BIN_DIR/evercode"
+  case ":$PATH:" in
+    *":$BIN_DIR:"*)
+      echo "launcher on PATH: run 'evercode' from any project dir." ;;
+    *)
+      echo "launcher symlinked at $BIN_DIR/evercode — add $BIN_DIR to PATH to run 'evercode' anywhere." ;;
+  esac
 else
   echo "(dry-run complete — nothing written)"
 fi
