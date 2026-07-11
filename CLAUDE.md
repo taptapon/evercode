@@ -89,9 +89,16 @@ re-trigger on every later request because the harness keeps old turns.
 
 ## Versioning
 
-Version lives in **`.claude-plugin/plugin.json`** only (`"version"`). SKILL.md
-§1 reads it dynamically for the auto-update check — there is no hardcoded
-version in SKILL.md. Bump the one field, nothing else.
+Version lives in **two** files and they MUST stay in sync:
+- `.claude-plugin/plugin.json` (`"version"`)
+- `.claude-plugin/marketplace.json` (`plugins[].version`)
+
+SKILL.md §1 reads `plugin.json` dynamically for the auto-update check — there
+is no hardcoded version in SKILL.md. But Claude Code's **installer** keys off
+`marketplace.json`'s version: bump only `plugin.json` and CC sees no new
+version, never refreshes the cache, and the upgrade silently doesn't take
+(the cache dir stays at the old version). Bump **both** fields to the same
+value.
 
 ## Git
 
