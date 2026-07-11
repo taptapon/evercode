@@ -48,20 +48,34 @@ not a library or an app you run directly. There is no build step.
 
 ## The flush proxy (`proxy/`)
 
-Optional companion. When `EVERCODE_FLUSH_PROXY=1`, Inner 5.5 emits a unique
+Optional companion. Pre-flight §11 detects it (`ANTHROPIC_BASE_URL` + `/health`),
+asks the user, and records the opt-in in `state.json.flush_proxy`. Inner 5.5
+reads that field — not the `EVERCODE_FLUSH_PROXY` env var — to emit the unique
 sentinel `<<EC_FLUSH:<timestamp>>>`; the proxy trims history at that boundary
 and prepends a pointer to re-read disk (no LLM summarizer — it leans on Inner 0).
+The proxy must be on the API path *before* Claude Code launches (`ANTHROPIC_BASE_URL`
+is fixed at launch); the skill detects+records but cannot hot-plug it mid-session.
 
 ```bash
 # quick smoke check the module loads + core logic is intact
 python3 -c "import importlib.util as u; s=u.spec_from_file_location('n','proxy/server.py'); m=u.module_from_spec(s); s.loader.exec_module(m); print('loaded; KEEP_RECENT=',m.KEEP_RECENT)"
 
-# run it
+# run it  (before launching Claude Code)
 ./proxy/run.sh
-# then in the evercode shell:
 export ANTHROPIC_BASE_URL=http://127.0.0.1:5589 EVERCODE_FLUSH_PROXY=1
 curl http://127.0.0.1:5589/health
+
+# stop it (shared service — NOT auto-stopped at shift end)
+./proxy/stop.sh
 ```
+
+**Chaining with cc-switch:** no conflict — the proxy sits in front
+(proxy `:5589` → cc-switch `:15721` → real API). It only rewrites the body and
+forwards auth verbatim, so cc-switch's routing/account-switching still works.
+Gotcha: the proxy auto-detects upstream from `$EVERCODE_UPSTREAM` →
+`$ANTHROPIC_BASE_URL` → `~/.claude/settings.json` → `api.anthropic.com`; if it
+can't see cc-switch's URL it **silently bypasses cc-switch**. When chaining,
+set it explicitly: `EVERCODE_UPSTREAM=http://127.0.0.1:15721 ./proxy/run.sh`.
 
 If you change the sentinel format in `proxy/server.py`, update the `SENTINEL_RE`
 **and** the emit line in SKILL.md Inner 5.5 together — they must match. The

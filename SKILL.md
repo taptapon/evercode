@@ -72,9 +72,10 @@ Run these checks in order. Failures stop the shift before any work begins.
 **Ask pre-flight questions ONE AT A TIME.** Do not batch confirmations into a
 single message. For each check that requires user input (bypass-permissions
 confirmation, non-git mode confirmation, branch creation on main/master,
-uncommitted changes, objective, goal approval), send a single question,
-wait for the reply, then proceed to the next check. This keeps the pre-flight
-conversational and avoids overwhelming the user with a wall of decisions.
+uncommitted changes, flush proxy opt-in, objective, goal approval), send a
+single question, wait for the reply, then proceed to the next check. This keeps
+the pre-flight conversational and avoids overwhelming the user with a wall of
+decisions.
 
 ### 1. Skill version check + auto-update
 
@@ -296,7 +297,8 @@ failed.
   "average_task_duration_minutes": null,
   "end_consensus_file": null,
   "key_results": [],
-  "test_results": null
+  "test_results": null,
+  "flush_proxy": false
 }
 ```
 
@@ -328,6 +330,55 @@ test -f "$SKILL_DIR/INVARIANTS.md" || {
 
 Aborting here is correct: every per-task refresh in §Inner 0 reads
 `$SKILL_DIR/INVARIANTS.md`, so the run cannot proceed without it.
+
+### 11. Flush proxy (optional)
+
+The flush proxy trims conversation history at task boundaries so a long run
+doesn't accumulate an unbounded transcript. It is **optional** and must sit on
+the Claude Code API path — which is fixed at process launch, so this step only
+**detects + asks + records**; it cannot hot-plug the proxy into a running
+session.
+
+Detect whether the proxy is currently on the path and healthy:
+
+```bash
+PORT="${EVERCODE_PROXY_PORT:-5589}"
+PROXY_ON_PATH=0
+case "${ANTHROPIC_BASE_URL:-}" in *":${PORT}") PROXY_ON_PATH=1 ;; esac
+HEALTH_OK=0
+[ "$PROXY_ON_PATH" = "1" ] && \
+  curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && HEALTH_OK=1
+```
+
+Then branch — **ask at most one question**, per the one-at-a-time pre-flight rule:
+
+- **`EVERCODE_FLUSH_PROXY=1` already set** (user opted in at launch) → skip the
+  question. Record `flush_proxy: true` and print one line: "flush proxy:
+  opt-in detected via env, sentinels enabled."
+- **`HEALTH_OK=1`** (proxy on path and healthy) → ask:
+  ```
+  Flush proxy detected on your API path (:PORT, healthy). It trims conversation
+  history at each task boundary to keep long runs lean. Emit per-task flush
+  sentinels? (recommended for long runs) (yes / no)
+  ```
+  yes → `flush_proxy: true`; no → `flush_proxy: false`.
+- **Not detected** → ask:
+  ```
+  Enable the flush proxy? It trims conversation history at task boundaries.
+  NOTE: the proxy must be on your API path, which is fixed at Claude Code launch
+  — it is NOT currently detected. To use it:
+    1. ./proxy/run.sh                         (separate shell)
+    2. relaunch Claude Code with ANTHROPIC_BASE_URL=http://127.0.0.1:5589
+       and EVERCODE_FLUSH_PROXY=1
+    3. re-trigger evercode
+  Enable now? (yes / no)
+  ```
+  yes → print the three steps above and **abort this shift** (do not silently
+  proceed without flushing). no → `flush_proxy: false`, continue.
+
+Write the decision to `state.json.flush_proxy` (boolean). This field — not the
+env var — is what Inner 5.5 reads to decide whether to emit sentinels, so the
+opt-in survives compaction and works regardless of Bash-env propagation.
 
 ## Objective Question
 
@@ -993,20 +1044,28 @@ Update state.json:
 
 ### Inner 5.5: Flush-proxy sentinel (optional)
 
-If the evercode flush proxy is on the API path (env `EVERCODE_FLUSH_PROXY=1`),
-emit a **unique** sentinel now so the proxy trims conversation history at this
-task boundary:
+If this run opted into flushing (`state.json.flush_proxy == true`, set during
+pre-flight §11), emit a **unique** sentinel now so the proxy trims conversation
+history at this task boundary:
 
 ```bash
-[ "${EVERCODE_FLUSH_PROXY:-0}" = "1" ] && printf '\n<<EC_FLUSH:%s>>\n' "$(date +%s)"
+[ "$(jq -r .flush_proxy "$RUN_DIR/state.json" 2>/dev/null)" = "true" ] && \
+  printf '\n<<EC_FLUSH:%s>>\n' "$(date +%s)"
 ```
+
+Why the gate is on disk, not env: the opt-in must survive compaction and not
+depend on `EVERCODE_FLUSH_PROXY` propagating across separate Bash tool calls
+(it doesn't — each call is a fresh subprocess of Claude Code). `state.json` is
+the source of truth. `EVERCODE_FLUSH_PROXY=1` remains useful only as a
+pre-flight hint (§11 reads it to skip the question) and as the classic
+launch-time opt-in.
 
 Why this is safe: evercode recovers full state from disk via **Inner 0** every
 task, so dropping earlier turns costs nothing. The timestamp makes each sentinel
 unique, and the proxy consumes each id exactly once — so it trims once per task
-and never re-trims on later turns. If the proxy is not in the path
-(`EVERCODE_FLUSH_PROXY` unset), the line prints nothing and is a complete
-no-op; non-proxy users are unaffected. See `proxy/README.md`.
+and never re-trims on later turns. If `flush_proxy` is false the line prints
+nothing and is a complete no-op; non-proxy users are unaffected. See
+`proxy/README.md`.
 
 ### Inner 6: Update State and Next Task
 
@@ -1301,6 +1360,11 @@ When the shift ends (consensus or 8-hour cap):
 If the user wants the handoff committed to the repo, they can do that
 manually after reviewing. The skill intentionally does not commit — the
 handoff is private notes, not a repo artifact.
+
+If `state.json.flush_proxy` was true this shift, note "flush proxy: on" in the
+handoff. The proxy is a shared, optional service and is **not** auto-stopped at
+shift end — when the user is done with all evercode work they can stop it with
+`./proxy/stop.sh`.
 
 Handoff structure:
 
