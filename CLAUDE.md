@@ -49,7 +49,7 @@ not a library or an app you run directly. There is no build step.
 
 ## The flush proxy (`proxy/`)
 
-Optional companion. Pre-flight §2 detects it (`ANTHROPIC_BASE_URL` + `/health`),
+Optional companion. Pre-flight §1 detects it (`ANTHROPIC_BASE_URL` + `/health`),
 asks the user, and records the opt-in in `state.json.flush_proxy`. Inner 5.5
 reads that field — not the `EVERCODE_FLUSH_PROXY` env var — to emit the unique
 sentinel `<<EC_FLUSH:<timestamp>>>`; the proxy trims history at that boundary
@@ -97,7 +97,7 @@ Version lives in **two** files and they MUST stay in sync:
 - `.claude-plugin/plugin.json` (`"version"`)
 - `.claude-plugin/marketplace.json` (`plugins[].version`)
 
-SKILL.md §1 reads `plugin.json` dynamically for the auto-update check — there
+SKILL.md §2 reads `plugin.json` dynamically for the auto-update check — there
 is no hardcoded version in SKILL.md. But Claude Code's **installer** keys off
 `marketplace.json`'s version: bump only `plugin.json` and CC sees no new
 version, never refreshes the cache, and the upgrade silently doesn't take

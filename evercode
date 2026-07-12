@@ -46,11 +46,13 @@ PROXY_URL="http://127.0.0.1:${PORT}"
 # Strip our own flags; pass everything else through to Claude Code.
 USE_PROXY=1
 RESTART_PROXY=0
+BYPASS=0
 ARGS=()
 for a in "$@"; do
   case "$a" in
     --no-proxy)      USE_PROXY=0 ;;
     --restart-proxy) RESTART_PROXY=1 ;;
+    --dangerously-skip-permissions) BYPASS=1; ARGS+=("$a") ;;
     *)               ARGS+=("$a") ;;
   esac
 done
@@ -111,6 +113,8 @@ else
 fi
 
 # Hand off to Claude Code, passing through all flags (minus --no-proxy).
+# Signal bypass mode to the skill so its §3 skips the per-shift confirmation.
+[ "$BYPASS" = "1" ] && export EVERCODE_BYPASS=1
 # Guard the empty-array expansion for bash 3.2 (macOS) under set -u.
 if [ "${#ARGS[@]}" -gt 0 ]; then
   exec claude "${ARGS[@]}"

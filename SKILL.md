@@ -62,25 +62,27 @@ Then route:
 Run these checks in order. Failures stop the shift before any work begins.
 
 **Ask pre-flight questions ONE AT A TIME.** Do not batch confirmations into a
-single message. For each check that requires user input (bypass-permissions
-confirmation, non-git mode confirmation, branch creation on main/master,
-uncommitted changes, flush proxy opt-in, objective, goal approval), send a
+single message. For each check that requires user input (flush proxy opt-in,
+bypass-permissions confirmation, non-git mode confirmation, branch creation on
+main/master, uncommitted changes, objective, goal approval), send a
 single question, wait for the reply, then proceed to the next check. This keeps
 the pre-flight conversational and avoids overwhelming the user with a wall of
 decisions.
 
-### 1. Skill version check + auto-update
+### 1. Flush proxy (optional)
 
-Run this **first**, before any user prompt. It resolves the skill's install
-directory (used throughout pre-flight and by every later context refresh)
-and checks whether a newer version of the skill exists upstream. If so, it
-pulls it in. The check is fast (one `curl` to a GitHub raw URL) so it runs
-on every shift — no throttling.
+The flush proxy trims conversation history at task boundaries so a long run
+doesn't accumulate an unbounded transcript. It is **optional** and must sit on
+the Claude Code API path — which is fixed at process launch, so this step only
+**detects + asks + records**; it cannot hot-plug the proxy into a running
+session.
 
-Updates apply to the **next** `/evercode` invocation — Claude has already
-loaded the current SKILL.md into context, so hot-swapping the running shift
-is not possible. That is fine: the shift in progress completes on the loaded
-version, the next one picks up the update.
+This is the **first** pre-flight check because it is the only one that can
+abort and relaunch Claude Code (to put the proxy on the API path). If the user
+opts in, every later check — version update, branch setup, objective — is
+redone after relaunch, so ask before investing in them. It also resolves
+`$SKILL_DIR` up front (needed for the relaunch command below, and reused by
+§2's version check, `state.json.skill_dir` in §10, and `INVARIANTS.md` in §10).
 
 ```bash
 # Resolve SKILL_DIR. Plugin install first (authoritative), then user-level clone.
@@ -105,58 +107,12 @@ if [ -z "$SKILL_DIR" ] || [ ! -f "$SKILL_DIR/.claude-plugin/plugin.json" ]; then
     SKILL_DIR="$HOME/.claude/skills/evercode"
     PLUGIN_KEY=""   # clone install — no marketplace key
   else
-    SKILL_DIR=""    # could not resolve — auto-update will be skipped
+    SKILL_DIR=""    # could not resolve — relaunch cmd falls back; auto-update skipped
   fi
 fi
+echo "SKILL_DIR=$SKILL_DIR"
 
-# Compare local vs upstream (sed parses version; works before §4 installs jq).
-if [ -n "$SKILL_DIR" ]; then
-  LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
-  LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
-  REMOTE_VER=$(curl -fsS --max-time 5 \
-    "https://raw.githubusercontent.com/taptapon/evercode/main/.claude-plugin/plugin.json" \
-    2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
-
-  if [ -n "$LOCAL_VER" ] && [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" != "$REMOTE_VER" ] \
-     && [ "$(printf '%s\n%s\n' "$LOCAL_VER" "$REMOTE_VER" | sort -V | tail -1)" = "$REMOTE_VER" ]; then
-    if git -C "$SKILL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      git -C "$SKILL_DIR" pull --ff-only --quiet 2>/dev/null \
-        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (git clone). Active on next /evercode run."
-    else
-      TARGET="${PLUGIN_KEY:-evercode}"
-      claude plugin update "$TARGET" >/dev/null 2>&1 \
-        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (plugin). Active on next /evercode run."
-    fi
-  fi
-fi
-```
-
-`SKILL_DIR` is reused below: in §10 it is written to `state.json.skill_dir`,
-and in §11 it locates `INVARIANTS.md`. If the probe failed (neither install
-location matched), continue without auto-update — the shift can still run as
-long as `INVARIANTS.md` is reachable via the fallback in §11.
-
-Network failures, HTTP errors, and missing `claude` CLI are all swallowed
-silently. This step must never block a shift from starting.
-
-**Codex dual-review is opt-in** (default: Claude self-reviews). Resolve the flag once here; §10 writes it to `state.json.codex_on`, and every Codex gate keys off it:
-
-```bash
-CODEX_ON=$([ "${EVERCODE_CODEX:-0}" = "1" ] && echo true || echo false)
-[ "$CODEX_ON" = "true" ] && echo "evercode: Codex dual-review ENABLED (EVERCODE_CODEX=1)."
-```
-
-### 2. Flush proxy (optional)
-
-The flush proxy trims conversation history at task boundaries so a long run
-doesn't accumulate an unbounded transcript. It is **optional** and must sit on
-the Claude Code API path — which is fixed at process launch, so this step only
-**detects + asks + records**; it cannot hot-plug the proxy into a running
-session.
-
-Detect whether the proxy is currently on the path and healthy:
-
-```bash
+# Detect whether the proxy is on the path and healthy.
 PORT="${EVERCODE_PROXY_PORT:-5589}"
 PROXY_ON_PATH=0
 case "${ANTHROPIC_BASE_URL:-}" in *":${PORT}") PROXY_ON_PATH=1 ;; esac
@@ -164,7 +120,7 @@ HEALTH_OK=0
 [ "$PROXY_ON_PATH" = "1" ] && \
   curl -fsS --max-time 3 "http://127.0.0.1:${PORT}/health" >/dev/null 2>&1 && HEALTH_OK=1
 
-# Absolute-path relaunch cmd — cwd is the user's project dir, so ./evercode won't resolve; use $SKILL_DIR (§1).
+# Absolute-path relaunch cmd — cwd is the user's project dir, so ./evercode won't resolve; use $SKILL_DIR (resolved above).
 LAUNCHER="$SKILL_DIR/evercode"
 if [ -x "$LAUNCHER" ]; then
   RELAUNCH_CMD="cd \"$PWD\" && \"$LAUNCHER\" --dangerously-skip-permissions"
@@ -172,6 +128,10 @@ else
   RELAUNCH_CMD="cd \"$PWD\" && ANTHROPIC_BASE_URL=http://127.0.0.1:${PORT} EVERCODE_FLUSH_PROXY=1 claude --dangerously-skip-permissions   # start \"$SKILL_DIR/proxy/run.sh\" first"
 fi
 ```
+
+If the probe failed (neither install location matched), continue — the relaunch
+command falls back to the manual form, and the shift can still run as long as
+`INVARIANTS.md` is reachable via the fallback in §10.
 
 Then branch — **ask at most one question**, per the one-at-a-time pre-flight rule:
 
@@ -197,9 +157,69 @@ Then branch — **ask at most one question**, per the one-at-a-time pre-flight r
   yes → echo `$RELAUNCH_CMD` once more and **abort this shift** (do not
   silently proceed without flushing). no → `flush_proxy: false`, continue.
 
-Write the decision to `state.json.flush_proxy` (boolean). This field — not the
-env var — is what Inner 5.5 reads to decide whether to emit sentinels, so the
-opt-in survives compaction and works regardless of Bash-env propagation.
+Hold the decision; it is written to `state.json.flush_proxy` (boolean) when
+§10 creates the run's `state.json`. That field — not the env var — is what
+Inner 5.5 reads to decide whether to emit sentinels, so the opt-in survives
+compaction and works regardless of Bash-env propagation.
+
+### 2. Skill version check + auto-update
+
+With `$SKILL_DIR` resolved in §1, check whether a newer version of the skill
+exists upstream and pull it in if so. The network check is **throttled to at
+most once per 2 hours** (a timestamp file in `~/.claude/`), so a repeat start
+within that window skips the curl entirely — delete
+`~/.claude/evercode_version_check.txt` to force a check. (Each Bash call is a
+fresh subprocess, so set `SKILL_DIR` to the value printed in §1 before running
+the block below — pre-flight carries it in context the same way §10 fills in
+`skill_dir`.)
+
+Updates apply to the **next** `/evercode` invocation — Claude has already
+loaded the current SKILL.md into context, so hot-swapping the running shift
+is not possible. That is fine: the shift in progress completes on the loaded
+version, the next one picks up the update.
+
+```bash
+# Throttle: hit the network at most once per 2h (timestamp file survives shifts),
+# so a repeat start within that window skips the 5s curl. Delete the file to force.
+CHECK_FILE="$HOME/.claude/evercode_version_check.txt"
+NOW=$(date +%s)
+LAST=$(cat "$CHECK_FILE" 2>/dev/null || echo 0)
+case "$LAST" in ''|*[!0-9]*) LAST=0 ;; esac
+RUN_CHECK=1
+[ $((NOW - LAST)) -lt 7200 ] && RUN_CHECK=0
+
+if [ "$RUN_CHECK" = "1" ] && [ -n "$SKILL_DIR" ]; then
+  # Compare local vs upstream (sed parses version; works before §4 installs jq).
+  LOCAL_PJ="$SKILL_DIR/.claude-plugin/plugin.json"
+  LOCAL_VER=$(sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$LOCAL_PJ" | head -1)
+  REMOTE_VER=$(curl -fsS --max-time 5 \
+    "https://raw.githubusercontent.com/taptapon/evercode/main/.claude-plugin/plugin.json" \
+    2>/dev/null | sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -1)
+
+  if [ -n "$LOCAL_VER" ] && [ -n "$REMOTE_VER" ] && [ "$LOCAL_VER" != "$REMOTE_VER" ] \
+     && [ "$(printf '%s\n%s\n' "$LOCAL_VER" "$REMOTE_VER" | sort -V | tail -1)" = "$REMOTE_VER" ]; then
+    if git -C "$SKILL_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      git -C "$SKILL_DIR" pull --ff-only --quiet 2>/dev/null \
+        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (git clone). Active on next /evercode run."
+    else
+      TARGET="${PLUGIN_KEY:-evercode}"
+      claude plugin update "$TARGET" >/dev/null 2>&1 \
+        && echo "evercode: updated $LOCAL_VER → $REMOTE_VER (plugin). Active on next /evercode run."
+    fi
+  fi
+  echo "$NOW" > "$CHECK_FILE"   # mark checked even on failure/parity — don't retry every start
+fi
+```
+
+Network failures, HTTP errors, and missing `claude` CLI are all swallowed
+silently. This step must never block a shift from starting.
+
+**Codex dual-review is opt-in** (default: Claude self-reviews). Resolve the flag once here; §10 writes it to `state.json.codex_on`, and every Codex gate keys off it:
+
+```bash
+CODEX_ON=$([ "${EVERCODE_CODEX:-0}" = "1" ] && echo true || echo false)
+[ "$CODEX_ON" = "true" ] && echo "evercode: Codex dual-review ENABLED (EVERCODE_CODEX=1)."
+```
 
 ### 3. Bypass-permissions confirmation
 
@@ -208,20 +228,22 @@ input. If Claude Code is NOT launched with `--dangerously-skip-permissions`, the
 loop will stall on permission prompts while the user is away.
 
 There is **no reliable way** for the agent to introspect the current permission
-mode from inside a session. So ask the user to confirm once, as the first pre-flight
-question:
+mode from inside a session. Two paths:
 
-```
-Before I start: is this session running in bypass-permissions mode
-(i.e., you launched Claude Code with `--dangerously-skip-permissions`)?
+- **`EVERCODE_BYPASS=1`** (set by the `./evercode` launcher when it forwards
+  `--dangerously-skip-permissions`) → skip the question. Print one line:
+  "bypass-permissions: opted in via launcher (EVERCODE_BYPASS=1)." and continue.
+- **Otherwise** → ask, as the first pre-flight question:
+  ```
+  Before I start: is this session running in bypass-permissions mode
+  (i.e., you launched Claude Code with `--dangerously-skip-permissions`)?
 
-Without it, the autonomous loop will stall on permission prompts while you're away.
+  Without it, the autonomous loop will stall on permission prompts while you're away.
 
-Reply "yes" to proceed, or "no" to abort — in which case, relaunch Claude Code
-with the flag and trigger evercode again.
-```
-
-If the user says no → abort with the above instructions. If yes → continue.
+  Reply "yes" to proceed, or "no" to abort — in which case, relaunch Claude Code
+  with the flag and trigger evercode again.
+  ```
+  If the user says no → abort with the above instructions. If yes → continue.
 
 ### 4. `jq` dependency
 
@@ -254,28 +276,41 @@ not be acceptable once the autonomous loop starts. After installing, re-check
 
 ### 5. Git repo detection
 
-Run `git rev-parse --is-inside-work-tree` to determine if the cwd is inside a
-git repo.
+One probe collects every git fact §6–§8 need, so they don't each spawn their
+own Bash call (this is what keeps the pre-flight preamble short):
 
-- **Git repo → full mode.** All commit-per-goal, drift, rollback, handoff-commit
-machinery runs.
-- **No git repo → graceful-degrade mode.** See §Non-Git Degrade Mode for the
-limitations. Warn the user once and ask for confirmation before proceeding:
+```bash
+IS_GIT=0; git rev-parse --is-inside-work-tree >/dev/null 2>&1 && IS_GIT=1
+BRANCH=""; BASE_COMMIT=""; GITIGNORE_HAS=0
+if [ "$IS_GIT" = "1" ]; then
+  BRANCH=$(git branch --show-current 2>/dev/null)
+  BASE_COMMIT=$(git rev-parse HEAD 2>/dev/null)
+  grep -qxF '.evercode/' .gitignore 2>/dev/null && GITIGNORE_HAS=1
+fi
+echo "IS_GIT=$IS_GIT BRANCH=$BRANCH BASE_COMMIT=$BASE_COMMIT GITIGNORE_HAS=$GITIGNORE_HAS"
+```
+
+- **`IS_GIT=0` → graceful-degrade mode.** See §Non-Git Degrade Mode for the
+  limitations. Warn the user once and ask for confirmation before proceeding:
   ```
   This directory is not a git repo. Evercode will run in degrade mode:
   no commits, no rollback, no drift protection. Failed goals may leave partial
   changes in your working tree. Proceed?
   ```
-  If yes → continue in degrade mode. If no → abort.
+  If yes → continue in degrade mode (skip §6–§8). If no → abort.
+- **`IS_GIT=1` → full mode.** All commit-per-goal, drift, rollback,
+  handoff-commit machinery runs. `BRANCH` and `BASE_COMMIT` are carried
+  forward to §10's `state.json`. Continue to §6.
 
 ### 6. Gitignore entry (git mode only)
 
-Ensure `.evercode/` is ignored. Read `.gitignore` (create if missing) and
-append `.evercode/` on its own line if not already present. This is a one-line
-diff the user will see alongside their other changes — expected and explicit.
+Ensure `.evercode/` is ignored. If the §5 probe found `GITIGNORE_HAS=0`,
+append `.evercode/` on its own line (creating `.gitignore` if missing). This
+is a one-line diff the user will see alongside their other changes — expected
+and explicit. If `GITIGNORE_HAS=1`, skip — nothing to do.
 
 ```bash
-if ! grep -qxF '.evercode/' .gitignore 2>/dev/null; then
+if [ "$GITIGNORE_HAS" = "0" ]; then
   printf '\n.evercode/\n' >> .gitignore
 fi
 ```
@@ -285,25 +320,37 @@ collaborator consistency and clarity.
 
 ### 7. Branch check (git mode only)
 
-Run `git branch --show-current`. Must not be `main` or `master`.
+`BRANCH` came from the §5 probe. Must not be `main` or `master`.
 
 - If on `main` or `master`: **propose creating a new branch** rather than
 waiting for the user. Suggest a descriptive name based on session context
 (e.g., `evercode/YYYY-MM-DD` or `feat/<topic>` inferred from the
 conversation). Ask for confirmation or a different name. On confirmation,
-run `git checkout -b <name>` and proceed.
+run `git checkout -b <name>` and re-record `BRANCH` and `BASE_COMMIT`.
 - On any other branch: proceed on it.
-
-Record the branch as `BRANCH` and the current commit as `BASE_COMMIT`.
 
 ### 8. Clean working tree (git mode only)
 
-Run `git status --short`. If there are uncommitted changes (other than the
-`.gitignore` line we just added), ask the user to commit or stash them. This is
-the only other permitted question besides goal confirmation.
+Re-check the working tree now — after §6 may have added the `.gitignore`
+line, which is the only change evercode makes here and the only dirty file
+that's expected.
 
-If the `.gitignore` change is the only dirty file, commit it automatically
-with message `chore: ignore .evercode/` before proceeding.
+```bash
+DIRTY=$(git status --short 2>/dev/null)
+OTHER=$(printf '%s\n' "$DIRTY" | grep -vE '\.gitignore$')   # drop the expected .gitignore change
+if [ -n "$OTHER" ]; then
+  echo "CLEAN_TREE=no     # pre-existing uncommitted changes — ask the user"
+else
+  echo "CLEAN_TREE=yes"
+  [ "$GITIGNORE_HAS" = "0" ] && git add .gitignore && git commit -q -m "chore: ignore .evercode/" >/dev/null 2>&1
+fi
+```
+
+- **`CLEAN_TREE=no`** → there are pre-existing uncommitted changes. Ask the
+user to commit or stash them. This is the only other permitted question
+besides goal confirmation.
+- **`CLEAN_TREE=yes`** → the tree was clean (the `.gitignore` line aside,
+which the block auto-committed). Proceed.
 
 ### 9. Active-shift guard
 
@@ -332,8 +379,7 @@ banner (see §Objective Confirmation), so elapsed-time and the 8h hard cap
 measure only the autonomous portion.
 
 The `skill_dir` field below holds the `$SKILL_DIR` resolved in §1; substitute
-the real path when writing the file. See §11 for the fallback if §1's probe
-failed.
+the real path when writing the file.
 
 ```json
 {
@@ -353,21 +399,18 @@ failed.
   "key_results": [],
   "test_results": null,
   "flush_proxy": false,
-  "codex_on": "<$CODEX_ON from §1>"
+  "codex_on": "<$CODEX_ON from §2>"
 }
 ```
 
 (In degrade mode: `"mode": "no-git"`, omit `branch`, `base_commit`, `expected_head`.)
 
-### 11. Verify INVARIANTS.md is reachable
-
-The non-negotiable rules live in `INVARIANTS.md`, a sibling of this SKILL.md
-in the skill's install directory. The agent does NOT copy it into the run
-folder — it reads directly from the skill dir every time it needs a refresh.
-
-`SKILL_DIR` (resolved in §1, recorded as `state.json.skill_dir` in §10) is what
-later tasks read after context compaction. Sanity-check that the file is
-reachable before proceeding:
+Finally, verify `INVARIANTS.md` is reachable at `$SKILL_DIR/INVARIANTS.md`. The
+non-negotiable rules live there — a sibling of this SKILL.md in the skill's
+install dir — and the agent reads it directly (never copied into the run
+folder) on every per-task refresh (§Inner 0), so the run cannot proceed
+without it. This same check covers the `skill_dir` fallback if §1's probe
+failed.
 
 ```bash
 test -f "$SKILL_DIR/INVARIANTS.md" || {
@@ -382,9 +425,6 @@ test -f "$SKILL_DIR/INVARIANTS.md" || {
   fi
 }
 ```
-
-Aborting here is correct: every per-task refresh in §Inner 0 reads
-`$SKILL_DIR/INVARIANTS.md`, so the run cannot proceed without it.
 
 ## Objective Question
 
@@ -1009,7 +1049,7 @@ Update state.json:
 ### Inner 5.5: Flush-proxy sentinel (optional)
 
 If this run opted into flushing (`state.json.flush_proxy == true`, set during
-pre-flight §2), emit a **unique** sentinel now so the proxy trims conversation
+pre-flight §1), emit a **unique** sentinel now so the proxy trims conversation
 history at this task boundary:
 
 ```bash
@@ -1021,7 +1061,7 @@ Why the gate is on disk, not env: the opt-in must survive compaction and not
 depend on `EVERCODE_FLUSH_PROXY` propagating across separate Bash tool calls
 (it doesn't — each call is a fresh subprocess of Claude Code). `state.json` is
 the source of truth. `EVERCODE_FLUSH_PROXY=1` remains useful only as a
-pre-flight hint (§2 reads it to skip the question) and as the classic
+pre-flight hint (§1 reads it to skip the question) and as the classic
 launch-time opt-in.
 
 Why this is safe: evercode recovers full state from disk via **Inner 0** every
