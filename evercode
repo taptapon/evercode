@@ -43,6 +43,17 @@ PROXY_URL="http://127.0.0.1:${PORT}"
 # hint points at the real file regardless of which copy is running.
 : "${EVERCODE_PROXY_LOG:=${HOME}/.claude/evercode-proxy.log}"
 
+# Auto-detect upstream from settings.json so chaining (proxy -> cc-switch -> API)
+# works without EVERCODE_UPSTREAM being set manually. Only set when the configured
+# ANTHROPIC_BASE_URL is NOT already pointing at the proxy (would loop).
+if [ -z "${EVERCODE_UPSTREAM:-}" ]; then
+  _base="$(grep -Eo '"ANTHROPIC_BASE_URL"\s*:\s*"[^"]*"' ~/.claude/settings.json 2>/dev/null \
+    | head -1 | grep -Eo 'http[^"]+' || true)"
+  if [ -n "$_base" ] && [ "$_base" != "$PROXY_URL" ] && [ "$_base" != "${PROXY_URL}/" ]; then
+    export EVERCODE_UPSTREAM="$_base"
+  fi
+fi
+
 # Strip our own flags; pass everything else through to Claude Code.
 USE_PROXY=1
 RESTART_PROXY=0
