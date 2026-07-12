@@ -41,7 +41,10 @@ re-trim on every subsequent request, capping the agent's working context at
 The `evercode` launcher handles launch order for you: it starts the proxy
 (daemonized, reusing one already running on `:5589`), points Claude Code at it,
 and sets `EVERCODE_FLUSH_PROXY=1` — which also makes evercode's pre-flight skip
-its yes/no question. Pass `--no-proxy` to skip the proxy explicitly. If the
+its yes/no question. Pass `--no-proxy` to skip the proxy explicitly. Pass
+`--restart-proxy` to kill any proxy already on the port and start a fresh one —
+use this after a plugin upgrade, since by default the launcher reuses a healthy
+old process (and would keep running the old code). If the
 proxy can't become healthy, the launcher falls back to launching Claude Code
 without it (never pointing at a dead port). The proxy is left running after
 Claude Code exits; stop it with `./proxy/stop.sh`.
@@ -132,7 +135,16 @@ curl http://127.0.0.1:5589/health
 
 ### Logs
 
-`proxy/proxy.log` — one line per request; `[FLUSH]` lines mark each trim.
+`~/.claude/evercode-proxy.log` — one line per request; `[FLUSH]` lines mark
+each trim. The path is the **same regardless of which `server.py` copy is
+running** (repo checkout or plugin cache), so there's always one log to watch
+and a plugin update doesn't orphan the history into a stale file. Override
+with `EVERCODE_PROXY_LOG`.
+
+```bash
+tail -f ~/.claude/evercode-proxy.log        # [MSG]=per request, [FLUSH]=a trim fired
+curl -s http://127.0.0.1:5589/health        # trims + consumed_sentinels counters
+```
 
 ### Stop it
 
@@ -157,7 +169,8 @@ evercode shift ends — stop it manually once you're done with all evercode work
 | `EVERCODE_UPSTREAM` | current `ANTHROPIC_BASE_URL` | Where to forward traffic. Never the proxy's own port. |
 | `EVERCODE_KEEP_RECENT` | `6` | Messages kept verbatim after a trim. |
 | `EVERCODE_MIN_TO_TRIM` | `10` | Don't trim conversations this small or smaller. |
-| `EVERCODE_PROXY_LOG` | `proxy/proxy.log` | Log file path. |
+| `EVERCODE_PROXY_LOG` | `~/.claude/evercode-proxy.log` | Log file path. |
+| `EVERCODE_PROXY_RESTART` | `0` | `1` = stop any proxy on the port before starting (loads fresh code after an upgrade). |
 | `EVERCODE_FLUSH_PROXY` | — | Set to `1` so the **skill** emits sentinels (proxy reads nothing from this). |
 
 ---

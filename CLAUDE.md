@@ -56,9 +56,12 @@ and prepends a pointer to re-read disk (no LLM summarizer — it leans on Inner 
 The proxy must be on the API path *before* Claude Code launches (`ANTHROPIC_BASE_URL`
 is fixed at launch); the skill detects+records but cannot hot-plug it mid-session.
 The repo-root `./evercode` launcher handles the ordering for users: it starts the
-proxy daemonized (reusing one already up), sets the env, and `exec claude`. For
-contributor/debug use, `run.sh` also runs foreground by default and daemonized
-under `EVERCODE_PROXY_DAEMON=1`.
+proxy daemonized (reusing one already up), sets the env, and `exec claude`. Pass
+`--restart-proxy` (or `EVERCODE_PROXY_RESTART=1` to `run.sh`) to kill any proxy
+already on the port first — use this after a version bump so the new code
+actually loads instead of reusing a healthy old process. For contributor/debug
+use, `run.sh` also runs foreground by default and daemonized under
+`EVERCODE_PROXY_DAEMON=1`.
 
 ```bash
 # quick smoke check the module loads + core logic is intact

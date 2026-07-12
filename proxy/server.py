@@ -69,9 +69,19 @@ MIN_TO_TRIM = int(os.environ.get("EVERCODE_MIN_TO_TRIM") or "10")
 # A sentinel looks like  <<EC_FLUSH:1752220800>>  (id = digits / word chars).
 SENTINEL_RE = re.compile(r"<<EC_FLUSH:(\w+)>>")
 
-LOG_PATH = os.environ.get("EVERCODE_PROXY_LOG") or os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "proxy.log"
-)
+def _default_log_path() -> str:
+    """Stable, version- and repo-independent log location.
+
+    Same path regardless of which server.py copy is running (repo checkout vs
+    plugin cache), so there's always ONE log to watch and a plugin update
+    doesn't orphan the history into a stale file. EVERCODE_PROXY_LOG overrides.
+    """
+    return os.path.join(os.path.expanduser("~"), ".claude", "evercode-proxy.log")
+
+
+LOG_PATH = os.environ.get("EVERCODE_PROXY_LOG") or _default_log_path()
+# Ensure the log dir exists (e.g. a custom EVERCODE_PROXY_LOG pointing elsewhere).
+os.makedirs(os.path.dirname(os.path.abspath(LOG_PATH)), exist_ok=True)
 
 
 def _resolve_upstream() -> str:
@@ -110,13 +120,20 @@ class _FlushHandler(logging.FileHandler):
         self.flush()
 
 
+# One formatter for every handler so the file and terminal lines match.
+_log_fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
 _fh = _FlushHandler(LOG_PATH, mode="a")
-_fh.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s"))
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout), _fh],
-)
+_fh.setFormatter(_log_fmt)
+_handlers = [_fh]
+if sys.stdout.isatty():
+    # Foreground/interactive: mirror to the terminal too. In daemon mode stdout
+    # is redirected to the same log file by run.sh, so attaching the stream
+    # handler here would write every line twice — skip it and let the FileHandler
+    # be the single writer (run.sh's 2>&1 still captures stderr tracebacks).
+    _sh = logging.StreamHandler(sys.stdout)
+    _sh.setFormatter(_log_fmt)
+    _handlers.append(_sh)
+logging.basicConfig(level=logging.INFO, handlers=_handlers)
 log = logging.getLogger("evercode-flush")
 
 

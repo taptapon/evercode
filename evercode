@@ -3,6 +3,7 @@
 # Claude Code pointed at it, in one command.
 #
 #   ./evercode --dangerously-skip-permissions      # with flush proxy (default)
+#   ./evercode --restart-proxy ...                 # kill any existing proxy first, start fresh (use after an upgrade)
 #   ./evercode --no-proxy ...                       # skip the proxy entirely
 #   claude ...                                      # without proxy, as before
 #
@@ -38,16 +39,20 @@ fi
 
 PORT="${EVERCODE_PROXY_PORT:-5589}"
 PROXY_URL="http://127.0.0.1:${PORT}"
+# Log location used in error hints — same default server.py / run.sh use, so the
+# hint points at the real file regardless of which copy is running.
+: "${EVERCODE_PROXY_LOG:=${HOME}/.claude/evercode-proxy.log}"
 
-# Strip our own flag; pass everything else through to Claude Code.
+# Strip our own flags; pass everything else through to Claude Code.
 USE_PROXY=1
+RESTART_PROXY=0
 ARGS=()
 for a in "$@"; do
-  if [ "$a" = "--no-proxy" ]; then
-    USE_PROXY=0
-  else
-    ARGS+=("$a")
-  fi
+  case "$a" in
+    --no-proxy)      USE_PROXY=0 ;;
+    --restart-proxy) RESTART_PROXY=1 ;;
+    *)               ARGS+=("$a") ;;
+  esac
 done
 
 if ! command -v claude >/dev/null 2>&1; then
@@ -60,6 +65,13 @@ health_ok() {
 }
 
 if [ "$USE_PROXY" = "1" ]; then
+  if [ "$RESTART_PROXY" = "1" ]; then
+    # Kill any proxy already on :PORT (e.g. a stale older version) so this launch
+    # loads fresh code. Idempotent. By default we reuse a healthy old process;
+    # --restart-proxy overrides that — use it after a plugin upgrade.
+    echo "evercode: --restart-proxy: stopping any proxy on :${PORT} ..."
+    EVERCODE_PROXY_PORT="$PORT" "${DIR}/proxy/stop.sh" >/dev/null 2>&1 || true
+  fi
   if health_ok; then
     echo "evercode: flush proxy already running on :${PORT}, reusing."
   else
@@ -77,14 +89,14 @@ if [ "$USE_PROXY" = "1" ]; then
       if health_ok; then ready=1; break; fi
       pid="$(cat "$PID_FILE" 2>/dev/null || true)"
       if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
-        echo "evercode: proxy process exited (port conflict?). See ${DIR}/proxy/proxy.log." >&2
+        echo "evercode: proxy process exited (port conflict?). See ${EVERCODE_PROXY_LOG}." >&2
         break
       fi
       sleep 0.2
     done
     if [ "$ready" != "1" ]; then
       echo "evercode: WARNING — flush proxy did not become healthy on :${PORT}." >&2
-      echo "           See ${DIR}/proxy/proxy.log. Launching Claude Code WITHOUT the proxy." >&2
+      echo "           See ${EVERCODE_PROXY_LOG}. Launching Claude Code WITHOUT the proxy." >&2
       USE_PROXY=0
     fi
   fi
