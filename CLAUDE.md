@@ -103,6 +103,24 @@ version, never refreshes the cache, and the upgrade silently doesn't take
 (the cache dir stays at the old version). Bump **both** fields to the same
 value.
 
+## Release process
+
+Releasing = bumping the version so users' auto-update picks it up. Current
+convention: **no git tag, no GitHub Release, no CHANGELOG** — follow the
+existing pattern until you deliberately change it.
+
+1. Land feature/fix commits first; keep the version bump as its **own** commit
+   (`chore: bump version to X.Y.Z`).
+2. Bump the version in **both** files to the same value (see Versioning above):
+   `.claude-plugin/plugin.json` (`"version"`) and
+   `.claude-plugin/marketplace.json` (`plugins[].version`).
+3. `git add` both, `git commit -m "chore: bump version to X.Y.Z"`.
+4. `git push origin main` — that's the release.
+
+To load it locally: reinstall the plugin so the cache refreshes to the new
+version, then launch with `--restart-proxy` so the new code runs instead of
+reusing a healthy old process.
+
 ## Git
 
 The skill never runs `git push` and never opens PRs during a shift — but as a
