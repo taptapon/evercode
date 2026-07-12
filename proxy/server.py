@@ -65,6 +65,15 @@ LISTEN_PORT = int(os.environ.get("EVERCODE_PROXY_PORT") or "5589")
 KEEP_RECENT = int(os.environ.get("EVERCODE_KEEP_RECENT") or "6")
 MIN_TO_TRIM = int(os.environ.get("EVERCODE_MIN_TO_TRIM") or "10")
 
+# Read version from plugin.json (same repo)
+_plugin_json = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            ".claude-plugin", "plugin.json")
+try:
+    with open(_plugin_json, encoding="utf-8") as f:
+        VERSION = json.load(f).get("version", "unknown")
+except Exception:
+    VERSION = "unknown"
+
 # A sentinel looks like  <<EC_FLUSH:1752220800>>  (id = digits / word chars).
 SENTINEL_RE = re.compile(r"<<EC_FLUSH:(\w+)>>")
 
@@ -297,6 +306,7 @@ def _trim_for_flush(messages: list):
 
 _consumed_ids = set()   # sentinel ids already acted on (one trim each)
 _trim_counter = [0]     # mutable counter for /health
+_req_counter = [0]      # mutable counter for all proxied requests
 
 
 # --------------------------------------------------------------------------- #
@@ -357,20 +367,21 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # -- raw passthrough ---------------------------------------------------- #
 
     def _proxy_raw(self, method: str):
+        _req_counter[0] += 1
+        req_id = _req_counter[0]
         body = self._read_body()
         headers = _forward_headers(self._headers_dict(), body if body else None)
-        log.info(f"[RAW] {method} {self.path} -> {UPSTREAM_URL} ({len(body)} bytes)")
+        log.info(f"-> #{req_id} {method} {self.path} upstream={UPSTREAM_URL} body={len(body):,}B")
         try:
             conn = _upstream_conn()
             conn.request(method, _join_path(UPSTREAM_PATH, self.path),
                          body=body if body else None, headers=headers)
             resp = conn.getresponse()
-            log.info(f"[RAW] {resp.status} {resp.reason}")
             total = self._stream_response(resp)
-            log.info(f"[RAW] streamed {total:,} bytes")
+            log.info(f"<- #{req_id} {resp.status} {resp.reason} streamed={total:,}B")
             conn.close()
         except Exception as e:
-            log.error(f"[RAW] upstream error: {e}", exc_info=True)
+            log.error(f"<- #{req_id} upstream error: {e}", exc_info=True)
             self._send_error(502, str(e))
 
     # -- HTTP verbs --------------------------------------------------------- #
@@ -411,6 +422,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             "sentinel_pattern": str(SENTINEL_RE.pattern),
             "trims": _trim_counter[0],
             "consumed_sentinels": len(_consumed_ids),
+            "total_requests": _req_counter[0],
+            "version": VERSION,
         }
         body = json.dumps(data).encode()
         self.send_response(200)
@@ -420,18 +433,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _handle_messages(self):
+        _req_counter[0] += 1
+        req_id = _req_counter[0]
         raw = self._read_body()
         req_headers = self._headers_dict()
 
         try:
             payload = json.loads(raw)
         except json.JSONDecodeError:
-            log.error("[MSG] invalid JSON")
+            log.error(f"#{req_id} invalid JSON")
             self._send_error(400, "Invalid JSON")
             return
 
         messages = payload.get("messages", [])
         model = payload.get("model", "unknown")
+        system_len = len(str(payload.get("system", "")))
+        tools = payload.get("tools") or []
+        input_tokens = len(raw)  # rough estimate
+        n_msgs = len(messages)
+
+        log.info(
+            f"-> #{req_id} POST /v1/messages upstream={UPSTREAM_URL} "
+            f"model={model} msgs={n_msgs} system={system_len}B tools={len(tools)} body={input_tokens:,}B"
+        )
 
         # Scan for sentinel ids across all message text.
         found_ids = []
@@ -453,36 +477,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     messages = trimmed
                     _trim_counter[0] += 1
                     log.info(
-                        f"[FLUSH] new sentinel(s) {new_ids}: trimmed "
-                        f"{len(payload['messages'])} -> {len(trimmed)} messages (model={model})"
+                        f"#{req_id} [FLUSH] new={new_ids} trimmed {n_msgs}->{len(trimmed)} msgs"
                     )
                 else:
                     log.info(
-                        f"[FLUSH] new sentinel(s) {new_ids} but only "
-                        f"{len(messages)} messages — stripped sentinel, no trim"
+                        f"#{req_id} sentinel(s)={new_ids} but only {len(messages)} msgs — "
+                        f"stripped sentinel, no trim (threshold: >{KEEP_RECENT} + >{MIN_TO_TRIM})"
                     )
             else:
-                log.info(f"[MSG] {len(found_ids)} sentinel(s) already consumed — stripped, no trim")
+                log.info(f"#{req_id} {len(found_ids)} sentinel(s) already consumed — stripped, no trim")
 
             payload["messages"] = messages
 
         body = json.dumps(payload).encode()
         headers = _forward_headers(req_headers, body, strip_encoding=True)
-        log.info(
-            f"[MSG] POST {self.path} -> {UPSTREAM_URL} "
-            f"({len(body):,} bytes, {len(payload.get('messages', []))} msgs, trim={did_trim})"
-        )
         try:
             conn = _upstream_conn()
             conn.request("POST", _join_path(UPSTREAM_PATH, self.path),
                          body=body, headers=headers)
             resp = conn.getresponse()
-            log.info(f"[MSG] {resp.status} {resp.reason}")
+            log.info(
+                f"<- #{req_id} {resp.status} {resp.reason} "
+                f"msgs={len(payload.get('messages', []))} trim={did_trim} model={model}"
+            )
             total = self._stream_response(resp)
-            log.info(f"[MSG] streamed {total:,} bytes")
+            log.info(f"<- #{req_id} streamed {total:,}B")
             conn.close()
         except Exception as e:
-            log.error(f"[MSG] upstream error: {e}", exc_info=True)
+            log.error(f"<- #{req_id} upstream error: {e}", exc_info=True)
             self._send_error(502, str(e))
 
 
@@ -509,7 +531,7 @@ class ThreadedHTTPServer(HTTPServer):
 
 
 def main():
-    log.info(f"Evercode Flush Proxy starting on 127.0.0.1:{LISTEN_PORT}")
+    log.info(f"Evercode Flush Proxy v{VERSION} starting on 127.0.0.1:{LISTEN_PORT}")
     log.info(f"  Upstream       : {UPSTREAM_URL}")
     log.info(f"  Keep recent    : {KEEP_RECENT} messages")
     log.info(f"  Min to trim    : {MIN_TO_TRIM} messages")
