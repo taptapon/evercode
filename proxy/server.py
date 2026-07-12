@@ -44,7 +44,6 @@ Wiring (see README.md for the full recipe):
     export EVERCODE_UPSTREAM=http://127.0.0.1:15721   # your real upstream
     python3 proxy/server.py                              # listens on :5589
     export ANTHROPIC_BASE_URL=http://127.0.0.1:5589      # point Claude Code here
-    export EVERCODE_FLUSH_PROXY=1                       # skill emits sentinels
 """
 
 import json

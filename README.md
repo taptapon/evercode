@@ -172,14 +172,13 @@ proxy/   # flush proxy：在每个任务边界裁剪对话，不含 summarizer
 ./evercode --dangerously-skip-permissions          # 一条命令：启动 proxy + Claude Code
 ```
 
-启动器会启动 flush proxy（若已在运行则复用），把 Claude Code 指向它，并替你设好 `EVERCODE_FLUSH_PROXY=1`——这样你还顺带跳过了班次前的确认提问。请在你的**项目**目录里运行它；proxy 通过脚本自身位置定位。如果 proxy 起不来，启动器会退化为不带 proxy 启动 Claude Code（绝不指向死端口）。加 `--no-proxy` 可显式跳过。
+启动器会启动 flush proxy（若已在运行则复用），把 Claude Code 指向它——pre-flight 探测到代理在 path 上就会自动开启 flushing，无需确认。请在你的**项目**目录里运行它；proxy 通过脚本自身位置定位。如果 proxy 起不来，启动器会退化为不带 proxy 启动 Claude Code（绝不指向死端口）。加 `--no-proxy` 可显式跳过。
 
 或者手动分步：
 
 ```bash
 ./proxy/run.sh                                      # 监听 :5589
 export ANTHROPIC_BASE_URL=http://127.0.0.1:5589     # 把 Claude Code 指向这里
-export EVERCODE_FLUSH_PROXY=1                       # 技能发出哨兵标记
 ```
 
-`EVERCODE_FLUSH_PROXY` 控制哨兵的发射，所以不运行该代理的用户不会付出任何代价。完整细节、调参与单次哨兵设计见 [`proxy/README.md`](proxy/README.md)。
+哨兵只在 pre-flight 探测到代理在 path 上时才发射，所以不运行代理的用户不会付出任何代价。完整细节、调参与单次哨兵设计见 [`proxy/README.md`](proxy/README.md)。

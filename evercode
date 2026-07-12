@@ -106,7 +106,6 @@ fi
 
 if [ "$USE_PROXY" = "1" ]; then
   export ANTHROPIC_BASE_URL="$PROXY_URL"
-  export EVERCODE_FLUSH_PROXY=1
   echo "evercode: ANTHROPIC_BASE_URL=${PROXY_URL}  (flush proxy on)"
 else
   echo "evercode: launching Claude Code without flush proxy."

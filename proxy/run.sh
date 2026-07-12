@@ -2,8 +2,8 @@
 # Start the Evercode Flush Proxy.
 #
 # Easiest (proxy + Claude Code in one command):   ./evercode
-#   That launcher starts this proxy in daemon mode, points Claude Code at it,
-#   and sets EVERCODE_FLUSH_PROXY=1. Most users never call run.sh directly.
+#   That launcher starts this proxy in daemon mode and points Claude Code at it.
+#   Most users never call run.sh directly.
 #
 # Run the proxy alone:
 #   Foreground (blocks; for debugging):          ./proxy/run.sh
@@ -13,8 +13,7 @@
 #
 # Then point Claude Code at it BEFORE launching it (the ./evercode launcher
 # does this for you):
-#     export ANTHROPIC_BASE_URL=http://127.0.0.1:5589
-#     export EVERCODE_FLUSH_PROXY=1     # tells the skill to emit sentinels
+#     export ANTHROPIC_BASE_URL=http://127.0.0.1:5589   # §1's /health probe detects it
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -64,7 +63,6 @@ if [ "${EVERCODE_PROXY_DAEMON:-0}" = "1" ]; then
 else
   echo "In a SEPARATE shell, before starting the evercode, set:"
   echo "  export ANTHROPIC_BASE_URL=http://127.0.0.1:${EVERCODE_PROXY_PORT}"
-  echo "  export EVERCODE_FLUSH_PROXY=1"
   echo
   exec python3 "${SCRIPT_DIR}/server.py"
 fi

@@ -39,9 +39,8 @@ re-trim on every subsequent request, capping the agent's working context at
 ```
 
 The `evercode` launcher handles launch order for you: it starts the proxy
-(daemonized, reusing one already running on `:5589`), points Claude Code at it,
-and sets `EVERCODE_FLUSH_PROXY=1` — which also makes evercode's pre-flight skip
-its yes/no question. Pass `--no-proxy` to skip the proxy explicitly. Pass
+(daemonized, reusing one already running on `:5589`), points Claude Code at it; pre-flight
+detects the proxy on the path and enables flushing automatically (no prompt). Pass `--no-proxy` to skip the proxy explicitly. Pass
 `--restart-proxy` to kill any proxy already on the port and start a fresh one —
 use this after a plugin upgrade, since by default the launcher reuses a healthy
 old process (and would keep running the old code). If the
@@ -60,28 +59,23 @@ does nothing. The launcher gets the order right; if you start things by hand:
 #    Foreground (blocks the terminal) — or daemonize:  EVERCODE_PROXY_DAEMON=1 ./proxy/run.sh
 ./proxy/run.sh
 
-# 2. In the shell you'll launch Claude Code from, point it at the proxy and
-#    preset the opt-in:
+# 2. In the shell you'll launch Claude Code from, point it at the proxy
+#    (pre-flight's /health probe detects it automatically):
 export ANTHROPIC_BASE_URL=http://127.0.0.1:5589
-export EVERCODE_FLUSH_PROXY=1
 
 # 3. Launch Claude Code and trigger evercode as usual.
 ```
 
 ### How evercode turns it on
 
-evercode's pre-flight (§11) detects the proxy by checking `ANTHROPIC_BASE_URL`
-+ the `/health` endpoint, asks whether to enable flushing, and records the
-answer in `state.json.flush_proxy`. **Inner 5.5 reads that field — not the
-env var — to decide whether to emit the sentinel**, so the opt-in survives
-context compaction. `EVERCODE_FLUSH_PROXY=1` still works as a launch-time
-preset: when pre-flight sees it set, it skips the question and records
-`flush_proxy: true` directly. Users who don't run the proxy are unaffected —
-sentinels are inert text when the proxy isn't on the path.
-
-If the proxy is not on the path but you ask for it, pre-flight prints the
-launch steps above and aborts the shift (it won't pretend to enable flushing
-mid-session).
+evercode's pre-flight (§1) detects the proxy by checking `ANTHROPIC_BASE_URL`
++ the `/health` endpoint. If the proxy is on the path and healthy it records
+`flush_proxy: true` and uses it; otherwise it records `flush_proxy: false`,
+prints the launch command as a hint, and continues without flushing. **No
+prompt, no abort.** **Inner 5.5 reads `state.json.flush_proxy` to decide
+whether to emit the sentinel**, so the decision survives context compaction.
+Users who don't run the proxy are unaffected — sentinels are inert text when
+the proxy isn't on the path.
 
 If your setup already has an upstream (e.g. `cc-switch` on `:15721`), set it
 explicitly so the proxy chains correctly:
@@ -171,7 +165,6 @@ evercode shift ends — stop it manually once you're done with all evercode work
 | `EVERCODE_MIN_TO_TRIM` | `10` | Don't trim conversations this small or smaller. |
 | `EVERCODE_PROXY_LOG` | `~/.claude/evercode-proxy.log` | Log file path. |
 | `EVERCODE_PROXY_RESTART` | `0` | `1` = stop any proxy on the port before starting (loads fresh code after an upgrade). |
-| `EVERCODE_FLUSH_PROXY` | — | Set to `1` so the **skill** emits sentinels (proxy reads nothing from this). |
 
 ---
 

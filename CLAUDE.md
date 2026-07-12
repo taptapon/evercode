@@ -49,9 +49,12 @@ not a library or an app you run directly. There is no build step.
 
 ## The flush proxy (`proxy/`)
 
-Optional companion. Pre-flight §1 detects it (`ANTHROPIC_BASE_URL` + `/health`),
-asks the user, and records the opt-in in `state.json.flush_proxy`. Inner 5.5
-reads that field — not the `EVERCODE_FLUSH_PROXY` env var — to emit the unique
+Optional companion. Pre-flight §1 detects it (`ANTHROPIC_BASE_URL` + `/health`)
+and records the result in `state.json.flush_proxy` — **no question, no abort**:
+proxy on path + healthy → `flush_proxy: true` (run uses it); otherwise
+`flush_proxy: false` and one hint line with the restart command, then continue.
+Inner 5.5
+reads that field to emit the unique
 sentinel `<<EC_FLUSH:<timestamp>>>`; the proxy trims history at that boundary
 and prepends a pointer to re-read disk (no LLM summarizer — it leans on Inner 0).
 The proxy must be on the API path *before* Claude Code launches (`ANTHROPIC_BASE_URL`
@@ -71,7 +74,7 @@ python3 -c "import importlib.util as u; s=u.spec_from_file_location('n','proxy/s
 # one-command launch (starts proxy + Claude Code):  ./evercode
 # run the proxy alone — foreground:    ./proxy/run.sh
 #                        daemon:        EVERCODE_PROXY_DAEMON=1 ./proxy/run.sh
-# both then need:  export ANTHROPIC_BASE_URL=http://127.0.0.1:5589 EVERCODE_FLUSH_PROXY=1
+# both then need:  export ANTHROPIC_BASE_URL=http://127.0.0.1:5589   # §1 detects the proxy via /health
 curl http://127.0.0.1:5589/health
 
 # stop it (shared service — NOT auto-stopped at shift end)

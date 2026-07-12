@@ -62,8 +62,8 @@ Then route:
 Run these checks in order. Failures stop the shift before any work begins.
 
 **Ask pre-flight questions ONE AT A TIME.** Do not batch confirmations into a
-single message. For each check that requires user input (flush proxy opt-in,
-bypass-permissions confirmation, non-git mode confirmation, branch creation on
+single message. For each check that requires user input (bypass-permissions
+confirmation, non-git mode confirmation, branch creation on
 main/master, uncommitted changes, objective, goal approval), send a
 single question, wait for the reply, then proceed to the next check. This keeps
 the pre-flight conversational and avoids overwhelming the user with a wall of
@@ -74,15 +74,15 @@ decisions.
 The flush proxy trims conversation history at task boundaries so a long run
 doesn't accumulate an unbounded transcript. It is **optional** and must sit on
 the Claude Code API path — which is fixed at process launch, so this step only
-**detects + asks + records**; it cannot hot-plug the proxy into a running
-session.
+**detects + records**; it never asks and never aborts. If the proxy is already
+on the path and healthy, the run uses it; if not, the run proceeds without
+flushing and prints the restart command as a hint for next time. No user input.
 
-This is the **first** pre-flight check because it is the only one that can
-abort and relaunch Claude Code (to put the proxy on the API path). If the user
-opts in, every later check — version update, branch setup, objective — is
-redone after relaunch, so ask before investing in them. It also resolves
-`$SKILL_DIR` up front (needed for the relaunch command below, and reused by
-§2's version check, `state.json.skill_dir` in §10, and `INVARIANTS.md` in §10).
+This is the **first** pre-flight check because it is cheap (one local curl) and
+its only side effects are setting `flush_proxy` and, when the proxy is off,
+echoing one hint line. It also resolves `$SKILL_DIR` up front (needed here for
+the hint command, and reused by §2's version check, `state.json.skill_dir` in
+§10, and `INVARIANTS.md` in §10).
 
 ```bash
 # Resolve SKILL_DIR. Plugin install first (authoritative), then user-level clone.
@@ -125,7 +125,7 @@ LAUNCHER="$SKILL_DIR/evercode"
 if [ -x "$LAUNCHER" ]; then
   RELAUNCH_CMD="cd \"$PWD\" && \"$LAUNCHER\" --dangerously-skip-permissions"
 else
-  RELAUNCH_CMD="cd \"$PWD\" && ANTHROPIC_BASE_URL=http://127.0.0.1:${PORT} EVERCODE_FLUSH_PROXY=1 claude --dangerously-skip-permissions   # start \"$SKILL_DIR/proxy/run.sh\" first"
+  RELAUNCH_CMD="cd \"$PWD\" && ANTHROPIC_BASE_URL=http://127.0.0.1:${PORT} claude --dangerously-skip-permissions   # start \"$SKILL_DIR/proxy/run.sh\" first"
 fi
 ```
 
@@ -133,29 +133,21 @@ If the probe failed (neither install location matched), continue — the relaunc
 command falls back to the manual form, and the shift can still run as long as
 `INVARIANTS.md` is reachable via the fallback in §10.
 
-Then branch — **ask at most one question**, per the one-at-a-time pre-flight rule:
+Then set `flush_proxy` from the probe — **no question, no abort**:
 
-- **`EVERCODE_FLUSH_PROXY=1` already set** (user opted in at launch) → skip the
-  question. Record `flush_proxy: true` and print one line: "flush proxy:
-  opt-in detected via env, sentinels enabled."
-- **`HEALTH_OK=1`** (proxy on path and healthy) → ask:
-  ```
-  Flush proxy detected on your API path (:PORT, healthy). It trims conversation
-  history at each task boundary to keep long runs lean. Emit per-task flush
-  sentinels? (recommended for long runs) (yes / no)
-  ```
-  yes → `flush_proxy: true`; no → `flush_proxy: false`.
-- **Not detected** → echo `$RELAUNCH_CMD` (a ready-to-run command resolved to
-  absolute paths and your current project dir), then ask:
-  ```
-  Flush proxy not detected on your API path. It trims conversation history at
-  task boundaries to keep long runs lean, but it must sit on the API path —
-  which is fixed at Claude Code launch, so it can't be hot-plugged into this
-  session. Exit Claude Code, paste the command above into your shell, then
-  re-run /evercode. Enable now? (yes / no)
-  ```
-  yes → echo `$RELAUNCH_CMD` once more and **abort this shift** (do not
-  silently proceed without flushing). no → `flush_proxy: false`, continue.
+- **`HEALTH_OK=1`** (proxy on path and healthy — the user already started it,
+  e.g. via the `./evercode` launcher) → `flush_proxy: true`. Print one line:
+  "flush proxy: on (detected :PORT, sentinels enabled)."
+- **Not detected** → `flush_proxy: false`. Echo `$RELAUNCH_CMD` once as a hint
+  (a ready-to-run command resolved to absolute paths and your current project
+  dir), then print one line: "flush proxy: off — to enable, exit and run the
+  command above, then re-run /evercode. Continuing without flushing." Do NOT
+  ask, do NOT abort: the shift proceeds with `flush_proxy: false`; the user
+  restarts on their own if they want the proxy.
+
+`flush_proxy` keys off the probe alone — the proxy must actually be on the
+path; without it there is nothing to trim, so no env var or flag can turn
+flushing on.
 
 Hold the decision; it is written to `state.json.flush_proxy` (boolean) when
 §10 creates the run's `state.json`. That field — not the env var — is what
@@ -1057,12 +1049,10 @@ history at this task boundary:
   printf '\n<<EC_FLUSH:%s>>\n' "$(date +%s)"
 ```
 
-Why the gate is on disk, not env: the opt-in must survive compaction and not
-depend on `EVERCODE_FLUSH_PROXY` propagating across separate Bash tool calls
-(it doesn't — each call is a fresh subprocess of Claude Code). `state.json` is
-the source of truth. `EVERCODE_FLUSH_PROXY=1` remains useful only as a
-pre-flight hint (§1 reads it to skip the question) and as the classic
-launch-time opt-in.
+Why the gate is on disk: the opt-in must survive compaction. Each Bash call is
+a fresh subprocess of Claude Code, so no in-memory or environment signal
+carries across them — `state.json` is the source of truth. §1 sets
+`flush_proxy` from its `/health` probe of the proxy; Inner 5.5 reads that field.
 
 Why this is safe: evercode recovers full state from disk via **Inner 0** every
 task, so dropping earlier turns costs nothing. The timestamp makes each sentinel
