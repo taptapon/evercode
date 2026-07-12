@@ -14,8 +14,9 @@ not a library or an app you run directly. There is no build step.
 
 | Path | Role |
 |---|---|
-| `SKILL.md` | The execution spec the agent runs verbatim (~1600 lines). Outer loop = key results; Inner loop = tasks (steps 0–6). |
+| `SKILL.md` | The execution spec the agent runs verbatim (~1400 lines). Outer loop = key results; Inner loop = tasks (steps 0–6). |
 | `INVARIANTS.md` | Non-negotiable rules; re-read by **Inner 0** before every task. |
+| `HANDOFF.md` | Locked handoff + terminal-banner templates; read at shift end. Cold-path split out of SKILL.md — NOT re-read by Inner 0 / Outer F, so keep **behavior rules** in SKILL.md and only **format** here. |
 | `skills/evercode/` | Install target. `SKILL.md` and `INVARIANTS.md` are **symlinked** here → `../../`. **Edit the root files**, not the symlinks. |
 | `.claude-plugin/plugin.json` | Marketplace manifest (name, version, author). |
 | `proxy/` | **Optional** companion: flush proxy that trims context at task boundaries. See `proxy/README.md`. |

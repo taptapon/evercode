@@ -708,11 +708,10 @@ objective, or would it over-engineer / over-optimize?**
 `status: "in_progress"`, record `started_at`, proceed to C.
 - **Rejected** (Codex contests the key result): mark `status: "codex-rejected"`, record Codex's reasoning, loop back to A. **A revised proposal is a NEW iteration**: fresh `proposed-key-result.md`, new `state.key_results[]` entry, MUST re-pass Outer B before decomposition — never assume the fix satisfies Codex (that's self-approval). If you can't propose anything Codex accepts, invoke §Condition 2 (write `end-consensus-draft.md` citing the rejections); otherwise keep iterating or wait for the 8h cap.
 
-If Codex is unavailable, the agent MUST still write a rigorous
-self-adversarial review to the same file, clearly marked
-`CODEX UNAVAILABLE — SELF-ADVERSARIAL REVIEW`, challenging the key result's
-value before approving. Agent self-approval without genuine adversarial
-reasoning is a protocol violation.
+If Codex is unavailable → **Invariant #14**: write a rigorous self-adversarial
+review to the same file — challenging the key result's value, not rubber-stamping
+it — with the header `CODEX UNAVAILABLE — SELF-REVIEW`. Self-approval without
+genuine adversarial reasoning is a protocol violation.
 
 ### Outer C: Decomposition Plan
 
@@ -753,8 +752,8 @@ proceed.
 
 Then copy the confirmed task list into `state.key_results[G].tasks[]`.
 
-If Codex is unavailable, do a rigorous self-adversarial review and write
-`CODEX UNAVAILABLE — SELF-ADVERSARIAL REVIEW` to the file.
+If Codex is unavailable → **Invariant #14** (self-adversarial review to the
+same file, header `CODEX UNAVAILABLE — SELF-REVIEW`).
 
 ### Outer E: Iterate Tasks
 
@@ -1262,181 +1261,31 @@ list of insufficient "done" rationales.
 
 ## Handoff (End of Successful Shift)
 
-When the shift ends (consensus or 8-hour cap):
+When the shift ends (consensus or 8-hour cap), write the handoff from the
+**locked templates** in `$SKILL_DIR/HANDOFF.md` — handoff.md structure, the
+terminal summary banner, the `status → end_reason` mapping, and the KR-list
+ordering rules all live there. That file is the single source for format; read
+it when you reach this section.
 
-1. **Run the drift check** (git mode). If it fails, emit terminal-only summary
+The **behavior rules** stay here (they must survive compaction):
 
-  and stop — do NOT set status to "completed" (leave as "drift-stopped").
+1. **Drift check first** (git mode). If it fails → terminal-only summary and
+   stop; do NOT set "completed" (leave "drift-stopped"), do NOT write a handoff.
 2. Read `$RUN_DIR/state.json` as the source of truth.
-3. Write the handoff to `$RUN_DIR/handoff.md`. Same location in both git and
+3. Write `$RUN_DIR/handoff.md` from the HANDOFF.md template. Same location in
+   git and degrade mode — no new folder, no commit.
+4. Set `status: "completed"` and `completed_at` in state.json.
+5. **Do NOT delete the run folder** — previous runs are kept as history.
+6. **Do NOT commit the handoff** — it's private notes, not a repo artifact; the
+   user can commit it manually after reviewing.
+7. If `state.json.flush_proxy` was true, note "flush proxy: on" in the handoff.
+   The proxy is a shared, optional service and is NOT auto-stopped at shift end
+   — the user stops it with `./proxy/stop.sh` when done with all evercode work.
+8. Print the locked terminal summary banner from HANDOFF.md.
 
-  degrade mode — no new folder to create, no commit to make. The handoff
-   lives alongside the run's state and artifacts so the whole run (plans,
-   Codex outputs, handoff) is in one place.
-4. Set run `status: "completed"` and `completed_at` in state.json.
-5. **Do NOT delete the run folder.** Previous runs are kept as history under
-
-  `.evercode/runs/`. Each run's `handoff.md` is the authoritative
-   user-facing record for that run.
-
-If the user wants the handoff committed to the repo, they can do that
-manually after reviewing. The skill intentionally does not commit — the
-handoff is private notes, not a repo artifact.
-
-If `state.json.flush_proxy` was true this shift, note "flush proxy: on" in the
-handoff. The proxy is a shared, optional service and is **not** auto-stopped at
-shift end — when the user is done with all evercode work they can stop it with
-`./proxy/stop.sh`.
-
-Handoff structure:
-
-```markdown
-# Evercode Handoff — RUN_ID
-
-## Summary
-[2-3 sentences: what was accomplished overall, in terms of the large goals]
-
-**Run ID:** RUN_ID
-**Mode:** git / degrade
-**Branch:** BRANCH              [git mode only]
-**Started from:** BASE_COMMIT   [git mode only]
-**Objective:** [text or "propose"]
-**Commits:** N                  [git mode only]
-
-## Goals
-
-### Goal 1: [Large goal title] — Complete / Blocked / Partial
-**What shipped:** [1-2 sentences at goal level]
-**Tasks:** M completed / K total (origin: user-approved × J, autonomous × L)
-
-#### Task 1.1: [Title] — Complete
-- **Commit:** [short hash + message]   [git mode only]
-- **Changes:** [key bullet]
-- **Codex review:** Clean after N rounds
-
-#### Task 1.2: [Title] — Blocked
-- **Why:** [what Codex flagged or test failed]
-- **State:** reverted (git) / partial-in-tree (degrade)
-
-#### Task 1.3 [autonomous]: [Title] — Complete
-- (same fields — the [autonomous] tag marks additions the user did not explicitly approve)
-
-**Decisions made (goal-level):**
-- [judgment calls made without the user]
-
-### Goal 2: ...
-
-## Test Results
-- Passing: X/Y
-- New tests added: N
-
-## Items Needing Human Attention
-- [Anything you were unsure about]
-- [Decisions that should be validated]
-- [Tasks Codex flagged that you disagreed with]
-- [Tasks that were blocked/reverted and why]
-- [Autonomous additions — user should evaluate separately]
-- [Degrade-mode: any tasks that left partial changes in working tree]
-- [Codex-unavailable tasks, if any]
-
-## How to Review                                  [git mode only]
-```bash
-# All evercode commits (one per task, grouped under goals in this handoff)
-git log BASE_COMMIT..HEAD --oneline
-
-# Full diff
-git diff BASE_COMMIT
-
-# Revert a specific task's commit
-git revert <commit-hash>
-
-# Or undo all evercode work
-git reset --hard BASE_COMMIT
-```
-
-## Recommendations for Next Session
-
-- [What to work on next]
-- [Any tech debt introduced]
-
-```
-
-Terminal summary after writing the handoff.
-
-The output is a **locked template** — exact field order, no free-form
-prose, no extra sections, no embellishment between fields. Every shift's
-ending must look visually identical so the human can scan it at a
-glance. The only place for judgment is the **headline**, which is the
-verbatim first sentence of the handoff's `## Summary` section (do not
-paraphrase, do not compose a new one — copy it).
-
-```
-══════════════════════════════════════════════════════════════════════
-  EVERCODE ENDED — <end_reason>
-══════════════════════════════════════════════════════════════════════
-
-  <headline — verbatim first sentence of handoff ## Summary>
-
-  Run ID:    RUN_ID
-  Started:   YYYY-MM-DD HH:MM TZ
-  Ended:     YYYY-MM-DD HH:MM TZ
-  Elapsed:   Xh Ym  (cap: 8h)
-
-  Branch:    BRANCH                                  [git mode only]
-  Commits:   N new since BASE_COMMIT                 [git mode only]
-  Review:    git log BASE_COMMIT..HEAD --oneline     [git mode only]
-
-  Handoff:   .evercode/runs/RUN_ID/handoff.md
-  Run dir:   .evercode/runs/RUN_ID/
-
-──────────────────────────────────────────────────────────────────────
-  KEY RESULTS  (T total · C completed · B blocked · R reverted/superseded)
-──────────────────────────────────────────────────────────────────────
-
-  ✓ KR2   <title from state.key_results[].title>
-  ✓ KR3   <title>
-  ⊘ KR4   <title> (blocked — <one-phrase reason from state>)
-  ✗ KR1   <title> (superseded by KR2)
-
-──────────────────────────────────────────────────────────────────────
-  Tests: P/T total                                   [if recorded in state]
-══════════════════════════════════════════════════════════════════════
-```
-
-**`<end_reason>` derives from `state.status`:**
-
-| `state.status`  | `<end_reason>`                                    |
-|-----------------|---------------------------------------------------|
-| `completed`     | `dual consensus — <rationale, ≤ ~8 words>`        |
-| `hard-capped`   | `8-hour hard cap`                                 |
-| `interrupted`   | `user stopped`                                    |
-| `drift-stopped` | `drift detected — handoff NOT written`            |
-
-For `completed`, the `<rationale>` is a short phrase summarizing **why
-further work would not help** — taken from the corresponding section of
-`end-consensus-draft.md` (the same "why over-engineering" reasoning Codex
-just agreed with). Keep it terse and concrete. Examples:
-
-- `dual consensus — objective fully achieved`
-- `dual consensus — remaining work would over-engineer the objective`
-- `dual consensus — remaining work blocked on external decisions`
-- `dual consensus — remaining work needs human input the agent cannot supply`
-
-**KR list:** order = completed first (in completion order), then blocked,
-then reverted/superseded. Glyphs are fixed: `✓` completed, `⊘` blocked,
-`✗` reverted or superseded. The parenthesized annotation is **only**
-the terminal status reason (≤ ~6 words copied from state) — never free
-prose.
-
-**`drift-stopped` variant:** omit the headline (no handoff Summary
-exists). Replace the `Handoff:` line with `Handoff:   NOT WRITTEN — see
-drift output above`. Everything else stays.
-
-**Forbidden in the terminal summary:** `Status:` paragraphs, narrative
-sentences between fields, per-KR commentary beyond the parenthesized
-status reason, emoji, ASCII art beyond the three horizontal rules
-shown. If you feel the urge to add nuance, it belongs in the handoff
-file, not this banner.
+Fallback: if `$SKILL_DIR/HANDOFF.md` is unreachable (very old install), write a
+minimal handoff from `state.json` — objective, per-KR status, commits
+(`git log BASE_COMMIT..HEAD --oneline`), test results, items needing attention.
 
 ## Stop / Resume / Abandon (active-shift re-trigger)
 
